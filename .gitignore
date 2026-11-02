@@ -21,11 +21,16 @@ env/
 *.swp
 *.swo
 
+# Archives
+*.zip
+*.tar.gz
+*.tar
+*.gz
+*.7z
+
 # Datasets (do not commit raw or processed datasets to Git)
-data/raw/LOLv2/*
-!data/raw/LOLv2/.gitkeep
-data/raw/ExDark/*
-!data/raw/ExDark/.gitkeep
+data/raw/*
+!data/raw/**/.gitkeep
 data/processed/LOLv2/*
 !data/processed/LOLv2/.gitkeep
 data/processed/ExDark/*
