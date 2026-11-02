@@ -319,20 +319,21 @@ Il récupère le code depuis le dépôt GitHub, sauvegarde les checkpoints sur *
 1. Vérification de l'environnement GPU (NVIDIA T4 / V100 / A100).
 2. Montage de Google Drive pour la persistance des poids.
 3. Clonage du dépôt GitHub et installation des dépendances.
-4. Téléchargement ou accès aux données LOL-v2.
+4. Téléchargement ou accès aux données LOL-v2 et ExDark (décompression automatique).
 5. Sélection de la variante : **Modèle A**, **Modèle B** ou **Modèle C**.
-6. Initialisation aléatoire du U-Net (entraînement depuis zéro).
-7. Lancement de l'entraînement avec le `Trainer` modulaire.
-8. Visualisation des courbes de perte et des exemples de validation.
-9. Sauvegarde et reprise fiable après déconnexion."""),
+6. Configuration et redirection vers Google Drive.
+7. Préparation des DataLoaders LOL-v2 avec patchs 128x128.
+8. Lancement de l'entraînement avec le `Trainer` modulaire.
+9. Visualisation des courbes de perte et des aperçus visuels.
+10. Sauvegarde et synchronisation sur Google Drive."""),
         code_cell("""# 1. Vérification de l'environnement GPU
 !nvidia-smi
 import torch
 print("PyTorch Version :", torch.__version__)
 print("CUDA Disponible :", torch.cuda.is_available())
 if torch.cuda.is_available():
-    print("GPU Détecté :", torch.cuda.get_device_name(0))
-    print("Mémoire VRAM :", round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 2), "Go")
+    print("GPU Détecté     :", torch.cuda.get_device_name(0))
+    print("Mémoire VRAM    :", round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 2), "Go")
 else:
     print("⚠️ Aucun GPU détecté. Activez l'accélérateur GPU dans Exécution > Modifier le type d'exécution.")"""),
         code_cell("""# 2. Montage de Google Drive pour la persistance des checkpoints
@@ -345,20 +346,22 @@ GDRIVE_DIR = Path('/content/drive/MyDrive/NightVision_Gen')
 GDRIVE_DIR.mkdir(parents=True, exist_ok=True)
 print("✅ Google Drive monté avec succès :", GDRIVE_DIR)"""),
         code_cell("""# 3. Clone du dépôt GitHub et installation du package
-# Remplacez l'URL par l'URL de votre dépôt GitHub
-GITHUB_REPO_URL = "https://github.com/your-username/nightvision-gen.git"
+GITHUB_REPO_URL = "https://github.com/HASSANDADDA-04/nightvision-gen.git"
 
 %cd /content
 if not os.path.exists("nightvision-gen"):
     !git clone $GITHUB_REPO_URL
-%cd /content/nightvision-gen
+    %cd /content/nightvision-gen
+else:
+    %cd /content/nightvision-gen
+    !git pull
 
 # Installation des dépendances et du package en mode éditable
 !pip install -r requirements-colab.txt
 !pip install -e . --no-build-isolation
 print("✅ Package nightvision installé avec succès sur Colab.")"""),
         code_cell("""# 4. Configuration des chemins et accès aux datasets LOL-v2 et ExDark
-import sys, os, zipfile
+import sys, os, zipfile, shutil
 from pathlib import Path
 sys.path.append(str(Path("/content/nightvision-gen/src").resolve()))
 
@@ -369,9 +372,25 @@ sys.path.append(str(Path("/content/nightvision-gen/src").resolve()))
 # Recherche et décompression automatique des archives ZIP depuis Google Drive
 drive_lol_zip = list(GDRIVE_DIR.rglob("*LOL*.zip")) + list(GDRIVE_DIR.rglob("*lol*.zip"))
 if drive_lol_zip and not (Path("data/raw/LOLv2/Real_captured").exists()):
-    print(f"📦 Décompression automatique de {drive_lol_zip[0].name} depuis Google Drive vers le SSD rapide de Colab...")
+    print(f"📦 Décompression automatique de {drive_lol_zip[0].name} depuis Google Drive...")
     with zipfile.ZipFile(drive_lol_zip[0], 'r') as z:
-        z.extractall("data/raw/LOLv2")
+        first_entry = z.namelist()[0].strip('/')
+        if first_entry == "LOLv2" or first_entry.startswith("LOLv2/"):
+            z.extractall("data/raw")
+        else:
+            z.extractall("data/raw/LOLv2")
+
+    nested_lol = Path("data/raw/LOLv2/LOLv2")
+    if nested_lol.exists():
+        for item in nested_lol.iterdir():
+            dest = Path("data/raw/LOLv2") / item.name
+            if not dest.exists():
+                shutil.move(str(item), str(dest))
+        try:
+            nested_lol.rmdir()
+        except Exception:
+            pass
+
     print("✅ LOL-v2 est prêt sur Colab !")
 elif (GDRIVE_DIR / "data" / "LOLv2").exists() and not (Path("data/raw/LOLv2/Real_captured").exists()):
     print("📂 Copie de LOL-v2 depuis Drive vers le SSD Colab...")
@@ -383,15 +402,33 @@ drive_exdark_zip = list(GDRIVE_DIR.rglob("*ExDark*.zip")) + list(GDRIVE_DIR.rglo
 if drive_exdark_zip and not (Path("data/raw/ExDark/Bicycle").exists()):
     print(f"📦 Décompression automatique de {drive_exdark_zip[0].name}...")
     with zipfile.ZipFile(drive_exdark_zip[0], 'r') as z:
-        z.extractall("data/raw/ExDark")
+        first_entry = z.namelist()[0].strip('/')
+        if first_entry == "ExDark" or first_entry.startswith("ExDark/"):
+            z.extractall("data/raw")
+        else:
+            z.extractall("data/raw/ExDark")
+
+    nested_exdark = Path("data/raw/ExDark/ExDark")
+    if nested_exdark.exists():
+        for item in nested_exdark.iterdir():
+            dest = Path("data/raw/ExDark") / item.name
+            if not dest.exists():
+                shutil.move(str(item), str(dest))
+        try:
+            nested_exdark.rmdir()
+        except Exception:
+            pass
+
     print("✅ ExDark est prêt sur Colab !")
 elif (GDRIVE_DIR / "data" / "ExDark").exists() and not (Path("data/raw/ExDark/Bicycle").exists()):
     !cp -r /content/drive/MyDrive/NightVision_Gen/data/ExDark/* data/raw/ExDark/
 
-print("Vérification des chemins d'accès effectuée.")"""),
+# Vérification finale
+lol_ready = (Path("data/raw/LOLv2/Real_captured/Train/Low").exists() or Path("data/raw/LOLv2/Low").exists())
+print("Statut LOL-v2 :", "✅ Détecté et prêt" if lol_ready else "⚠️ Non détecté (déposez LOLv2.zip dans NightVision_Gen sur Drive)")"""),
         code_cell("""# 5. Sélection de la variante du modèle à entraîner
 # @title Configuration de l'Expérience { run: "auto" }
-MODEL_VARIANT = "C" # @param ["A", "B", "C"]
+MODEL_VARIANT = "A" # @param ["A", "B", "C"]
 EPOCHS = 100 # @param {type:"integer"}
 BATCH_SIZE = 16 # @param {type:"integer"}
 LEARNING_RATE = 1e-4 # @param {type:"number"}
@@ -420,7 +457,18 @@ drive_ckpt_dir = GDRIVE_DIR / f"checkpoints/model_{MODEL_VARIANT}"
 drive_ckpt_dir.mkdir(parents=True, exist_ok=True)
 cfg["paths"]["checkpoint_dir"] = str(drive_ckpt_dir)
 
-print("Configuration prête. Sauvegarde des checkpoints ciblée sur :", drive_ckpt_dir)"""),
+drive_log_dir = GDRIVE_DIR / f"logs/model_{MODEL_VARIANT}"
+drive_log_dir.mkdir(parents=True, exist_ok=True)
+cfg["paths"]["log_dir"] = str(drive_log_dir)
+
+drive_gen_dir = GDRIVE_DIR / f"generated_images/model_{MODEL_VARIANT}"
+drive_gen_dir.mkdir(parents=True, exist_ok=True)
+cfg["paths"]["generated_dir"] = str(drive_gen_dir)
+
+print("Configuration prête.")
+print("  - Checkpoints :", drive_ckpt_dir)
+print("  - Logs CSV    :", drive_log_dir)
+print("  - Images gen  :", drive_gen_dir)"""),
         code_cell("""# 7. Préparation des DataLoaders LOL-v2
 from torch.utils.data import DataLoader
 from nightvision.data.split_manager import LOLv2SplitManager
@@ -429,25 +477,35 @@ from nightvision.data.dataset import LOLv2PatchDataset, SyntheticPairDataset
 compute_retinex = MODEL_VARIANT in ("B", "C")
 manifest_path = Path("data/processed/lol_v2_splits.json")
 
+train_pairs = []
+val_pairs = []
+
 if manifest_path.exists():
-    splits = LOLv2SplitManager.load_split_manifest(manifest_path)
-    train_ds = LOLv2PatchDataset(splits["train"], compute_retinex=compute_retinex)
-    val_ds = LOLv2PatchDataset(splits["val"], compute_retinex=compute_retinex)
-else:
-    print("Manifeste non trouvé, initialisation du split manager...")
+    print("Lecture du manifeste :", manifest_path)
+    splits = LOLv2SplitManager.load_split_manifest(manifest_path, root_dir="data/raw/LOLv2")
+    train_pairs = splits.get("train", [])
+    val_pairs = splits.get("val", [])
+
+# Vérifier si les chemins pointent vers des fichiers réels existants
+if not train_pairs or not Path(train_pairs[0].low_path).exists():
+    print("Découverte dynamique des paires LOL-v2 depuis data/raw/LOLv2...")
     lol_mgr = LOLv2SplitManager(root_dir="data/raw/LOLv2", seed=42)
     splits = lol_mgr.create_splits()
-    if len(splits["train"]) > 0:
-        train_ds = LOLv2PatchDataset(splits["train"], compute_retinex=compute_retinex)
-        val_ds = LOLv2PatchDataset(splits["val"], compute_retinex=compute_retinex)
-    else:
-        print("⚠️ Images LOL-v2 introuvables. Utilisation du dataset synthétique pour démonstration.")
-        train_ds = SyntheticPairDataset(32, compute_retinex=compute_retinex)
-        val_ds = SyntheticPairDataset(8, compute_retinex=compute_retinex)
+    train_pairs = splits.get("train", [])
+    val_pairs = splits.get("val", [])
+
+if len(train_pairs) > 0 and Path(train_pairs[0].low_path).exists():
+    print(f"✅ Dataset réel LOL-v2 opérationnel : {len(train_pairs)} paires train, {len(val_pairs)} paires val.")
+    train_ds = LOLv2PatchDataset(train_pairs, patch_size=128, patches_per_image=4, is_train=True, compute_retinex=compute_retinex)
+    val_ds = LOLv2PatchDataset(val_pairs, patch_size=128, patches_per_image=2, is_train=False, compute_retinex=compute_retinex)
+else:
+    print("⚠️ Images LOL-v2 réelles non disponibles. Utilisation du dataset synthétique.")
+    train_ds = SyntheticPairDataset(32, image_size=128, compute_retinex=compute_retinex)
+    val_ds = SyntheticPairDataset(8, image_size=128, compute_retinex=compute_retinex)
 
 train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
 val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
-print(f"DataLoaders prêts : {len(train_loader)} batches d'entraînement.")"""),
+print(f"DataLoaders prêts : {len(train_loader)} batches par époque.")"""),
         code_cell("""# 8. Initialisation du Trainer et Lancement de l'Entraînement
 from nightvision.training.trainer import Trainer
 
@@ -456,21 +514,24 @@ trainer = Trainer(config=cfg, train_loader=train_loader, val_loader=val_loader)
 # Reprise éventuelle depuis un checkpoint existant
 latest_ckpt = drive_ckpt_dir / "checkpoint_latest.pt"
 if RESUME_TRAINING and latest_ckpt.exists():
-    print("Reprise de l'entraînement depuis :", latest_ckpt)
+    print("🔄 Reprise de l'entraînement depuis :", latest_ckpt)
     trainer.resume_from_checkpoint(latest_ckpt)
 
 # Lancement de l'entraînement
 print(f"🚀 Démarrage de l'entraînement du Modèle {MODEL_VARIANT} depuis zéro...")
 trainer.train()"""),
-        code_cell("""# 9. Visualisation des Courbes d'Apprentissage
+        code_cell("""# 9. Visualisation des Courbes d'Apprentissage et du Dernier Aperçu
 import pandas as pd
 import matplotlib.pyplot as plt
+from PIL import Image
 
-history_file = list(Path(cfg["paths"]["log_dir"]).glob("*_metrics.csv"))
-if history_file:
-    df = pd.read_csv(history_file[0])
+log_dir_path = Path(cfg["paths"]["log_dir"])
+history_files = list(log_dir_path.glob("*_metrics.csv")) + list(Path("artifacts/logs").rglob("*_metrics.csv"))
+
+if history_files:
+    df = pd.read_csv(history_files[0])
     plt.figure(figsize=(10, 4))
-    plt.plot(df["epoch"], df["train_loss"], label="Perte Entraînement", color="#3b82f6", lw=2)
+    plt.plot(df["epoch"], df["train_loss"], label="Perte Entraînement (Train)", color="#3b82f6", lw=2)
     if "val_loss" in df.columns:
         plt.plot(df["epoch"], df["val_loss"], label="Perte Validation", color="#ef4444", lw=2)
     plt.xlabel("Époque")
@@ -478,13 +539,27 @@ if history_file:
     plt.title(f"Historique d'Entraînement — Modèle {MODEL_VARIANT}")
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.7)
+    plt.tight_layout()
     plt.show()
 else:
-    print("Fichier de métriques en attente de génération.")"""),
-        code_cell("""# 10. Copie de Sauvegarde finale sur Google Drive
-!cp -r artifacts/logs/* {str(GDRIVE_DIR)}/logs/ || true
-!cp -r artifacts/generated_images/* {str(GDRIVE_DIR)}/generated_images/ || true
-print("✅ Checkpoints et résultats synchronisés avec succès sur Google Drive.")"""),
+    print("Fichier de métriques en attente de génération.")
+
+# Aperçu de la dernière validation
+gen_dir_path = Path(cfg["paths"]["generated_dir"])
+preview_imgs = sorted(list(gen_dir_path.glob("val_epoch_*.png")) + list(Path("artifacts/generated_images").rglob("val_epoch_*.png")))
+if preview_imgs:
+    last_preview = preview_imgs[-1]
+    print(f"🖼️ Dernier aperçu visuel généré : {last_preview.name}")
+    plt.figure(figsize=(12, 4))
+    plt.imshow(Image.open(last_preview))
+    plt.axis("off")
+    plt.title(f"Aperçu Restauration — {last_preview.stem}")
+    plt.tight_layout()
+    plt.show()"""),
+        code_cell("""# 10. Synchronisation finale sur Google Drive
+!cp -r artifacts/logs/* {str(GDRIVE_DIR)}/logs/ 2>/dev/null || true
+!cp -r artifacts/generated_images/* {str(GDRIVE_DIR)}/generated_images/ 2>/dev/null || true
+print("✅ Checkpoints, logs et aperçus synchronisés sur Google Drive :", GDRIVE_DIR)"""),
     ]
     with open(nb_dir / "04_train_ddpm_colab.ipynb", "w", encoding="utf-8") as f:
         json.dump(create_notebook(nb4_cells), f, indent=2)

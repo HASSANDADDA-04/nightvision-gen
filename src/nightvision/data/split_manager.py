@@ -205,23 +205,88 @@ class LOLv2SplitManager:
         manifest_path = Path(manifest_path)
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
-        data = {
-            split_name: [asdict(pair) for pair in pairs] for split_name, pairs in splits.items()
-        }
+        data = {}
+        for split_name, pairs in splits.items():
+            serialized_pairs = []
+            for pair in pairs:
+                p_dict = asdict(pair)
+                for key in ("low_path", "normal_path", "illumination_path"):
+                    val = p_dict.get(key)
+                    if val is not None:
+                        try:
+                            rel = Path(val).resolve().relative_to(self.root_dir.resolve())
+                            p_dict[key] = str(rel).replace("\\", "/")
+                        except Exception:
+                            p_dict[key] = str(val).replace("\\", "/")
+                serialized_pairs.append(p_dict)
+            data[split_name] = serialized_pairs
+
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         logger.info("Saved split manifest to %s", manifest_path)
 
     @staticmethod
-    def load_split_manifest(manifest_path: str | Path) -> dict[str, list[ImagePair]]:
-        """Load split assignments from a previously saved JSON manifest."""
+    def load_split_manifest(
+        manifest_path: str | Path,
+        root_dir: str | Path | None = None,
+    ) -> dict[str, list[ImagePair]]:
+        """Load split assignments from a previously saved JSON manifest.
+
+        Automatically resolves cross-platform paths (e.g. Windows and Linux Colab).
+        """
         manifest_path = Path(manifest_path)
         with open(manifest_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        return {
-            split_name: [ImagePair(**item) for item in items] for split_name, items in data.items()
-        }
+        base_root = Path(root_dir) if root_dir is not None else Path("data/raw/LOLv2")
+
+        def _resolve_one(p_str: str | None) -> str:
+            if not p_str:
+                return ""
+            p = Path(p_str)
+            if p.exists():
+                return str(p.resolve())
+
+            clean = str(p_str).replace("\\", "/")
+            if "Real_captured" in clean:
+                sub = clean[clean.index("Real_captured") :]
+                for cand in [
+                    base_root / sub,
+                    Path("data/raw/LOLv2") / sub,
+                    Path("data/raw/LOLv2/LOLv2") / sub,
+                    Path("/content/nightvision-gen/data/raw/LOLv2") / sub,
+                ]:
+                    if cand.exists():
+                        return str(cand.resolve())
+                return str((base_root / sub).resolve())
+
+            cand = base_root / clean
+            if cand.exists():
+                return str(cand.resolve())
+            return str(p)
+
+        result: dict[str, list[ImagePair]] = {}
+        for split_name, items in data.items():
+            loaded_pairs = []
+            for item in items:
+                low = _resolve_one(item.get("low_path"))
+                norm = _resolve_one(item.get("normal_path"))
+                illum = (
+                    _resolve_one(item.get("illumination_path"))
+                    if item.get("illumination_path")
+                    else None
+                )
+                loaded_pairs.append(
+                    ImagePair(
+                        pair_id=item["pair_id"],
+                        low_path=low,
+                        normal_path=norm,
+                        illumination_path=illum,
+                    )
+                )
+            result[split_name] = loaded_pairs
+
+        return result
 
 
 class ExDarkManager:
