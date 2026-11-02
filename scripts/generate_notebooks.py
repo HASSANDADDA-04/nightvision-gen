@@ -357,16 +357,36 @@ if not os.path.exists("nightvision-gen"):
 !pip install -r requirements-colab.txt
 !pip install -e . --no-build-isolation
 print("✅ Package nightvision installé avec succès sur Colab.")"""),
-        code_cell("""# 4. Configuration des chemins et accès au dataset LOL-v2
-import sys
+        code_cell("""# 4. Configuration des chemins et accès aux datasets LOL-v2 et ExDark
+import sys, os, zipfile
+from pathlib import Path
 sys.path.append(str(Path("/content/nightvision-gen/src").resolve()))
 
-# Création des liens symboliques vers Google Drive pour les checkpoints et datasets
+# Création des dossiers nécessaires
 !mkdir -p artifacts/checkpoints artifacts/logs artifacts/generated_images
-!mkdir -p data/raw/LOLv2
+!mkdir -p data/raw/LOLv2 data/raw/ExDark data/processed
 
-# Si LOL-v2 est déjà sur votre Drive, faites un lien symbolique :
-# !cp -r /content/drive/MyDrive/NightVision_Gen/data/LOLv2/* data/raw/LOLv2/
+# Recherche et décompression automatique des archives ZIP depuis Google Drive
+drive_lol_zip = list(GDRIVE_DIR.rglob("*LOL*.zip")) + list(GDRIVE_DIR.rglob("*lol*.zip"))
+if drive_lol_zip and not (Path("data/raw/LOLv2/Real_captured").exists()):
+    print(f"📦 Décompression automatique de {drive_lol_zip[0].name} depuis Google Drive vers le SSD rapide de Colab...")
+    with zipfile.ZipFile(drive_lol_zip[0], 'r') as z:
+        z.extractall("data/raw/LOLv2")
+    print("✅ LOL-v2 est prêt sur Colab !")
+elif (GDRIVE_DIR / "data" / "LOLv2").exists() and not (Path("data/raw/LOLv2/Real_captured").exists()):
+    print("📂 Copie de LOL-v2 depuis Drive vers le SSD Colab...")
+    !cp -r /content/drive/MyDrive/NightVision_Gen/data/LOLv2/* data/raw/LOLv2/
+    print("✅ LOL-v2 copié !")
+
+# Recherche et décompression automatique pour ExDark
+drive_exdark_zip = list(GDRIVE_DIR.rglob("*ExDark*.zip")) + list(GDRIVE_DIR.rglob("*exdark*.zip"))
+if drive_exdark_zip and not (Path("data/raw/ExDark/Bicycle").exists()):
+    print(f"📦 Décompression automatique de {drive_exdark_zip[0].name}...")
+    with zipfile.ZipFile(drive_exdark_zip[0], 'r') as z:
+        z.extractall("data/raw/ExDark")
+    print("✅ ExDark est prêt sur Colab !")
+elif (GDRIVE_DIR / "data" / "ExDark").exists() and not (Path("data/raw/ExDark/Bicycle").exists()):
+    !cp -r /content/drive/MyDrive/NightVision_Gen/data/ExDark/* data/raw/ExDark/
 
 print("Vérification des chemins d'accès effectuée.")"""),
         code_cell("""# 5. Sélection de la variante du modèle à entraîner

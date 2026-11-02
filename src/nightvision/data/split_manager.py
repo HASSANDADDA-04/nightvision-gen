@@ -260,6 +260,8 @@ class ExDarkManager:
         """Discover all images categorized by class folders in ExDark."""
         samples: list[ExDarkSample] = []
         extensions = {".png", ".jpg", ".jpeg", ".bmp"}
+        annot_dir = self.root_dir / "Annotations"
+        has_annot_dir = annot_dir.is_dir()
 
         for class_name, coco_class in self.CLASS_MAPPING_TO_COCO.items():
             class_folder = self.root_dir / class_name
@@ -275,11 +277,7 @@ class ExDarkManager:
             if class_folder is not None and class_folder.is_dir():
                 for img_file in class_folder.iterdir():
                     if img_file.is_file() and img_file.suffix.lower() in extensions:
-                        annot_file = self.root_dir / "Annotations" / f"{img_file.stem}.txt"
-                        if not annot_file.exists():
-                            # Annotation might be in same folder or subfolder
-                            annot_file = class_folder / f"{img_file.stem}.txt"
-
+                        annot_file = annot_dir / f"{img_file.stem}.txt" if has_annot_dir else (class_folder / f"{img_file.stem}.txt")
                         samples.append(
                             ExDarkSample(
                                 image_id=img_file.stem,
