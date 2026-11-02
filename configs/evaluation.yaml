@@ -1,0 +1,64 @@
+# ==============================================================================
+# NightVision Gen — Configuration de l'Évaluation Quantitative & Détection
+# ==============================================================================
+
+evaluation:
+  seed: 42
+  batch_size: 8
+  device: "auto"              # 'cuda', 'cpu', 'auto'
+
+# Paramètres DDIM (Denoising Diffusion Implicit Models)
+ddim:
+  timesteps_list: [25, 50, 100]  # Comparaison de différentes étapes d'échantillonnage
+  default_steps: 50
+  eta: 0.0                       # 0.0 = échantillonnage déterministe DDIM, 1.0 = DDPM standard
+  clip_denoised: true            # Borner les valeurs dans [-1, 1]
+
+# Baselines classiques sans entraînement
+baselines:
+  gamma:
+    values: [1.5, 2.2, 2.8]      # Différents coefficients de correction gamma
+    default: 2.2
+  clahe:
+    clip_limits: [2.0, 3.0, 4.0]
+    default_clip_limit: 3.0
+    tile_grid_size: [8, 8]
+
+# Métriques de qualité d'image
+metrics:
+  full_reference:
+    psnr: true
+    ssim: true
+    lpips: true
+    lpips_net: "vgg"             # 'alex' ou 'vgg'
+  no_reference:
+    niqe: true
+    saturation_index: true
+    contrast_ratio: true
+
+# Évaluation de la détection sur ExDark (détecteur préentraîné gelé)
+detection:
+  detector_name: "fasterrcnn_resnet50_fpn_v2" # Détecteur torchvision COCO gelé
+  confidence_threshold: 0.5
+  iou_threshold: 0.5
+  coco_class_mapping:
+    Bicycle: "bicycle"
+    Boat: "boat"
+    Bottle: "bottle"
+    Bus: "bus"
+    Car: "car"
+    Cat: "cat"
+    Chair: "chair"
+    Cup: "cup"
+    Dog: "dog"
+    Motorbike: "motorcycle"
+    People: "person"
+    Table: "dining table"
+
+# Sorties et rapports
+output:
+  metrics_csv: "artifacts/metrics/benchmark_results.csv"
+  detection_csv: "artifacts/metrics/detection_results.csv"
+  timing_csv: "artifacts/metrics/inference_timing.csv"
+  figures_dir: "artifacts/figures"
+

@@ -1,0 +1,57 @@
+# ==============================================================================
+# NightVision Gen — Configuration Entraînement : Modèle A (Base DDPM Conditionnel)
+# ==============================================================================
+
+experiment:
+  name: "model_A_base_ddpm"
+  model_variant: "A"          # 'A': sombre seul, 'B': sombre + retinex, 'C': sombre + retinex + edge_loss
+  seed: 42
+  description: "DDPM conditionné uniquement par l'image sombre d'entrée (concaténation 6 canaux)"
+
+model:
+  image_size: 128
+  in_channels: 6              # 3 (noisy target) + 3 (dark condition)
+  out_channels: 3             # 3 (predicted noise epsilon)
+  base_channels: 64
+  channel_mults: [1, 2, 4, 8]
+  num_res_blocks: 2
+  attention_resolutions: [16]
+  dropout: 0.1
+  time_embed_dim: 256
+  norm_groups: 32
+
+diffusion:
+  timesteps: 1000
+  beta_schedule: "cosine"
+  beta_start: 0.0001
+  beta_end: 0.02
+  prediction_type: "epsilon"
+
+training:
+  epochs: 100
+  batch_size: 16
+  learning_rate: 1.0e-4
+  min_lr: 1.0e-6
+  weight_decay: 1.0e-4
+  optimizer: "AdamW"          # 'AdamW', 'Adam'
+  betas: [0.9, 0.999]
+  lr_scheduler: "cosine"      # 'cosine', 'linear', 'step'
+  warmup_epochs: 5
+  gradient_clip_val: 1.0
+  mixed_precision: "fp16"     # 'no', 'fp16', 'bf16' (auto désactivé sur CPU)
+  checkpoint_frequency: 10    # Sauvegarde toutes les N époques
+  validation_frequency: 5     # Validation toutes les N époques
+  num_workers: 2
+  ema_decay: 0.9999           # Exponential Moving Average des poids
+  use_ema: true
+
+loss:
+  diffusion_loss_type: "l1"   # 'l1' ou 'l2' (SmoothL1 / MSE)
+  lambda_edge: 0.0            # Modèle A : pas de perte de contours
+
+paths:
+  data_config: "configs/data.yaml"
+  checkpoint_dir: "artifacts/checkpoints/model_A"
+  log_dir: "artifacts/logs/model_A"
+  generated_dir: "artifacts/generated_images/model_A"
+

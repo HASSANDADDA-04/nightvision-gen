@@ -1,0 +1,60 @@
+# ==============================================================================
+# NightVision Gen — Configuration des Données (LOL-v2 et ExDark)
+# ==============================================================================
+
+datasets:
+  lol_v2:
+    root_dir: "data/raw/LOLv2"
+    real_captured_dir: "data/raw/LOLv2/Real_captured"
+    train_dir: "data/raw/LOLv2/Real_captured/Train"
+    test_dir: "data/raw/LOLv2/Real_captured/Test"
+    low_subdir: "Low"
+    normal_subdir: "Normal"
+    test_pairs_count: 100
+    val_split_ratio: 0.15          # Découpage train / validation sans toucher au test
+    seed: 42
+
+  exdark:
+    root_dir: "data/raw/ExDark"
+    images_dir: "data/raw/ExDark/images"
+    annotations_dir: "data/raw/ExDark/annotations"
+    stratified_sample_size: 1000    # Sous-ensemble stratifié
+    seed: 42
+    classes:
+      - Bicycle
+      - Boat
+      - Bottle
+      - Bus
+      - Car
+      - Cat
+      - Chair
+      - Cup
+      - Dog
+      - Motorbike
+      - People
+      - Table
+
+# Paramètres d'extraction de patchs
+patches:
+  patch_size: 128
+  stride_train: 64                  # Chevauchement à l'entraînement
+  stride_eval: 96                   # Chevauchement à l'évaluation pour reconstruction douce
+  blending: "gaussian"              # 'linear', 'gaussian', ou 'hann' pour éviter les coutures
+  min_variance: 0.001               # Filtrage des patchs plats/noirs non informatifs
+
+# Paramètres d'illumination Retinex
+retinex:
+  method: "max_rgb_gaussian"        # L(x,y) = max(R,G,B) suivi de filtre gaussien
+  gaussian_kernel_size: 15
+  gaussian_sigma: 3.0
+  normalize: true                   # Normalisation [0, 1]
+
+# Répertoires de destination des données traitées
+processed:
+  output_dir: "data/processed"
+  lol_patches_train: "data/processed/LOLv2/train_patches"
+  lol_patches_val: "data/processed/LOLv2/val_patches"
+  lol_test: "data/processed/LOLv2/test"
+  illumination_cache: "data/processed/LOLv2/illumination_maps"
+  exdark_subset: "data/processed/ExDark/stratified_subset"
+

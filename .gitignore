@@ -1,0 +1,57 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# IDE and editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Datasets (do not commit raw or processed datasets to Git)
+data/raw/LOLv2/*
+!data/raw/LOLv2/.gitkeep
+data/raw/ExDark/*
+!data/raw/ExDark/.gitkeep
+data/processed/LOLv2/*
+!data/processed/LOLv2/.gitkeep
+data/processed/ExDark/*
+!data/processed/ExDark/.gitkeep
+
+# Artifacts, weights, large exports, and metrics logs
+artifacts/checkpoints/*/*.pt
+artifacts/checkpoints/*/*.pth
+artifacts/generated_images/*
+!artifacts/generated_images/.gitkeep
+artifacts/logs/*
+!artifacts/logs/.gitkeep
+artifacts/metrics/*
+!artifacts/metrics/.gitkeep
+artifacts/figures/*
+!artifacts/figures/.gitkeep
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+

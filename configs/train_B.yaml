@@ -1,0 +1,57 @@
+# ==============================================================================
+# NightVision Gen — Configuration Entraînement : Modèle B (DDPM + Retinex)
+# ==============================================================================
+
+experiment:
+  name: "model_B_retinex_ddpm"
+  model_variant: "B"          # 'B': sombre + retinex
+  seed: 42
+  description: "DDPM conditionné par l'image sombre + carte d'illumination Retinex (concaténation 7 canaux)"
+
+model:
+  image_size: 128
+  in_channels: 7              # 3 (noisy target) + 3 (dark condition) + 1 (retinex illumination)
+  out_channels: 3             # 3 (predicted noise epsilon)
+  base_channels: 64
+  channel_mults: [1, 2, 4, 8]
+  num_res_blocks: 2
+  attention_resolutions: [16]
+  dropout: 0.1
+  time_embed_dim: 256
+  norm_groups: 32
+
+diffusion:
+  timesteps: 1000
+  beta_schedule: "cosine"
+  beta_start: 0.0001
+  beta_end: 0.02
+  prediction_type: "epsilon"
+
+training:
+  epochs: 100
+  batch_size: 16
+  learning_rate: 1.0e-4
+  min_lr: 1.0e-6
+  weight_decay: 1.0e-4
+  optimizer: "AdamW"
+  betas: [0.9, 0.999]
+  lr_scheduler: "cosine"
+  warmup_epochs: 5
+  gradient_clip_val: 1.0
+  mixed_precision: "fp16"
+  checkpoint_frequency: 10
+  validation_frequency: 5
+  num_workers: 2
+  ema_decay: 0.9999
+  use_ema: true
+
+loss:
+  diffusion_loss_type: "l1"
+  lambda_edge: 0.0            # Modèle B : pas de perte de contours
+
+paths:
+  data_config: "configs/data.yaml"
+  checkpoint_dir: "artifacts/checkpoints/model_B"
+  log_dir: "artifacts/logs/model_B"
+  generated_dir: "artifacts/generated_images/model_B"
+

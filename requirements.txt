@@ -1,0 +1,25 @@
+# Core deep learning & vision
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.23.0
+scipy>=1.9.0
+pillow>=9.3.0
+opencv-python-headless>=4.7.0
+pyyaml>=6.0
+tqdm>=4.64.0
+matplotlib>=3.6.0
+scikit-image>=0.19.0
+lpips>=0.1.4
+
+# Detection evaluation
+pycocotools>=2.0.6
+
+# Streamlit application
+streamlit>=1.25.0
+
+# Development, formatting & testing
+pytest>=7.0.0
+black>=23.0.0
+ruff>=0.1.0
+python-dotenv>=1.0.0
+

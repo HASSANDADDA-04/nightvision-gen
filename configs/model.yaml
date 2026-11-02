@@ -1,0 +1,24 @@
+# ==============================================================================
+# NightVision Gen — Architecture U-Net & Processus de Diffusion DDPM
+# ==============================================================================
+
+model:
+  name: "ConditionalUNet"
+  image_size: 128
+  in_channels: 6              # 6 pour Modèle A (3 noisy + 3 dark), 7 pour B et C (+ 1 illumination)
+  out_channels: 3             # Bruit prédit epsilon (3 canaux RVB)
+  base_channels: 64
+  channel_mults: [1, 2, 4, 8] # Canaux : 64 -> 128 -> 256 -> 512
+  num_res_blocks: 2           # Blocs résiduels par niveau de résolution
+  attention_resolutions: [16] # Attention spatiale à résolution 16x16 (niveau 4)
+  dropout: 0.1
+  time_embed_dim: 256
+  norm_groups: 32
+
+diffusion:
+  timesteps: 1000             # T étapes de diffusion forward
+  beta_schedule: "cosine"     # 'linear' ou 'cosine' (Nichol & Dhariwal)
+  beta_start: 0.0001
+  beta_end: 0.02
+  prediction_type: "epsilon"  # Prédit le bruit epsilon standard N(0, I)
+
