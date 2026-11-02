@@ -92,7 +92,7 @@ nightvision-gen/
 ### Installation
 ```bash
 # 1. Cloner le dépôt
-git clone https://github.com/your-username/nightvision-gen.git
+git clone https://github.com/HASSANDADDA-04/nightvision-gen.git
 cd nightvision-gen
 
 # 2. Créer et activer l'environnement virtuel
