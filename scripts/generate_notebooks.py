@@ -346,20 +346,83 @@ GDRIVE_DIR = Path('/content/drive/MyDrive/NightVision_Gen')
 GDRIVE_DIR.mkdir(parents=True, exist_ok=True)
 print("✅ Google Drive monté avec succès :", GDRIVE_DIR)"""),
         code_cell("""# 3. Clone du dépôt GitHub et installation du package
-GITHUB_REPO_URL = "https://github.com/HASSANDADDA-04/nightvision-gen.git"
+import os, sys
+from pathlib import Path
+
+REPO_OWNER = "HASSANDADDA-04"
+REPO_NAME = "nightvision-gen"
+GITHUB_REPO_URL = f"https://github.com/{REPO_OWNER}/{REPO_NAME}.git"
+
+# @title Configuration de l'Accès GitHub { run: "auto" }
+# Si votre dépôt GitHub est PRIVÉ, vous devez soit :
+# 1) Le rendre PUBLIC sur GitHub (Settings > Danger Zone > Change visibility > Make Public)
+# 2) OU renseigner un GitHub Personal Access Token (PAT) ci-dessous :
+GITHUB_TOKEN = "" # @param {type:"string"}
+
+# Récupération automatique depuis les Secrets Colab (icône clé 🔑) si disponible
+try:
+    from google.colab import userdata
+    sec_tok = userdata.get('GH_TOKEN')
+    if sec_tok:
+        GITHUB_TOKEN = sec_tok
+except Exception:
+    pass
+
+# Construction de l'URL de clonage authentifiée si token présent
+if GITHUB_TOKEN.strip():
+    CLONE_URL = f"https://{GITHUB_TOKEN.strip()}@github.com/{REPO_OWNER}/{REPO_NAME}.git"
+else:
+    CLONE_URL = GITHUB_REPO_URL
 
 %cd /content
-if not os.path.exists("nightvision-gen"):
-    !git clone $GITHUB_REPO_URL
-    %cd /content/nightvision-gen
+
+repo_dir = Path("/content/nightvision-gen")
+if not repo_dir.exists():
+    print(f"📥 Clonage du dépôt {REPO_OWNER}/{REPO_NAME}...")
+    !git clone $CLONE_URL
 else:
+    print("🔄 Mise à jour du dépôt existant avec git pull...")
     %cd /content/nightvision-gen
     !git pull
+    %cd /content
+
+# Vérification obligatoire du succès du clonage
+if not repo_dir.exists() or not (repo_dir / "pyproject.toml").exists():
+    print("\n" + "="*70)
+    print("❌ ERREUR : Le clonage du dépôt a échoué.")
+    print("="*70)
+    print("👉 CAUSE : Votre dépôt GitHub est PRIVÉ ou inaccessible.")
+    print("   Git refuse le clonage sans identifiants valides.")
+    print("\n👉 SOLUTIONS SIMPLES :")
+    print(f"   Option A (LE PLUS SIMPLE) : Rendez le dépôt PUBLIC sur GitHub")
+    print(f"      1. Allez sur https://github.com/{REPO_OWNER}/{REPO_NAME}/settings")
+    print(f"      2. Descendez tout en bas dans 'Danger Zone'")
+    print(f"      3. Cliquez sur 'Change visibility' -> 'Make public'")
+    print(f"      4. Relancez ensuite cette cellule !")
+    print(f"\n   Option B : Utilisez un Token GitHub (Personal Access Token)")
+    print(f"      1. Créez un token sur https://github.com/settings/tokens (accès repo)")
+    print(f"      2. Collez-le dans le champ GITHUB_TOKEN ci-dessus et relancez.")
+    print("="*70 + "\n")
+    raise RuntimeError("Dépôt inaccessible. Veuillez le rendre Public ou renseigner un GITHUB_TOKEN.")
+
+%cd /content/nightvision-gen
 
 # Installation des dépendances et du package en mode éditable
+print("📦 Installation des dépendances Colab...")
 !pip install -r requirements-colab.txt
+print("📦 Installation du package nightvision en mode éditable...")
 !pip install -e . --no-build-isolation
-print("✅ Package nightvision installé avec succès sur Colab.")"""),
+
+# Enregistrement explicite dans sys.path pour éviter tout ModuleNotFoundError
+src_dir = str(Path("/content/nightvision-gen/src").resolve())
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
+
+try:
+    import nightvision
+    print("✅ Package nightvision installé et importé avec succès sur Colab !")
+except ImportError as err:
+    raise RuntimeError(f"Échec de l'importation de nightvision : {err}")"""),
         code_cell("""# 4. Configuration des chemins et accès aux datasets LOL-v2 et ExDark
 import sys, os, zipfile, shutil
 from pathlib import Path
