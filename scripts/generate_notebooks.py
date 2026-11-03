@@ -418,116 +418,116 @@ except ModuleNotFoundError:
     print("\n⚠️ Note Colab : Pour finaliser l'enregistrement dans Python 3.13 :")
     print("👉 Allez dans le menu : Exécution > Redémarrer la session (Runtime > Restart session)")
     print("👉 Puis relancez cette cellule : l'import sera immédiat !")"""),
-        code_cell("""# 4. Accès aux datasets déjà présents dans le dossier unique du Drive
-import sys, zipfile, shutil
+        code_cell("""# 4. Décompression et préparation des datasets depuis Google Drive vers le SSD rapide de Colab
+import os, sys, shutil, zipfile
 from pathlib import Path
-sys.path.append(str(Path("/content/nightvision-gen/src").resolve()))
 
-Path("artifacts/checkpoints").mkdir(parents=True, exist_ok=True)
-Path("artifacts/logs").mkdir(parents=True, exist_ok=True)
-Path("artifacts/generated_images").mkdir(parents=True, exist_ok=True)
-Path("data/raw/LOLv2").mkdir(parents=True, exist_ok=True)
-Path("data/raw/ExDark").mkdir(parents=True, exist_ok=True)
-Path("data/processed").mkdir(parents=True, exist_ok=True)
+DATA_RAW = Path("/content/nightvision-gen/data/raw")
+DATA_RAW.mkdir(parents=True, exist_ok=True)
+Path("/content/nightvision-gen/artifacts/checkpoints").mkdir(parents=True, exist_ok=True)
+Path("/content/nightvision-gen/artifacts/logs").mkdir(parents=True, exist_ok=True)
+Path("/content/nightvision-gen/artifacts/generated_images").mkdir(parents=True, exist_ok=True)
 
-def _find_root(base: Path, folder_name: str, markers: tuple[str, ...]) -> Path | None:
-    probes = [
-        base / "data" / "raw" / folder_name,
-        base / "data" / folder_name,
-        base / "raw" / folder_name,
-        base / folder_name,
-        base / "datasets" / folder_name,
-    ]
-    seen = []
-    for probe in probes:
-        seen.extend((probe, probe / folder_name))
-    for cand in seen:
-        if any((cand / marker).is_dir() for marker in markers):
-            return cand
-    return None
+drive_root = Path("/content/drive/MyDrive")
 
-def _find_zip(base: Path, needle: str) -> Path | None:
-    skip = {"LOLv2", "ExDark", "checkpoints", "logs", "generated_images", "data", "artifacts"}
-    levels = [base]
-    for depth in range(3):
-        nxt = []
-        for folder in levels:
+def find_zip_on_drive(pattern: str) -> Path | None:
+    # Recherche intelligente d'une archive zip sur tout Google Drive
+    if GDRIVE_DIR.exists():
+        for p in GDRIVE_DIR.rglob("*.zip"):
+            if pattern.lower() in p.name.lower():
+                return p
+    # 2. Vérifier à la racine de Mon Drive
+    for p in drive_root.glob("*.zip"):
+        if pattern.lower() in p.name.lower():
+            return p
+    # 3. Recherche élargie dans les sous-dossiers de Mon Drive (profondeur 2)
+    for folder in drive_root.iterdir():
+        if folder.is_dir() and not folder.name.startswith("."):
             try:
-                children = list(folder.iterdir())
+                for p in folder.glob("*.zip"):
+                    if pattern.lower() in p.name.lower():
+                        return p
             except OSError:
                 continue
-            for child in children:
-                if child.is_file() and child.suffix.lower() == ".zip" and needle in child.name.lower():
-                    return child
-                if child.is_dir() and depth < 2 and child.name not in skip:
-                    nxt.append(child)
-        levels = nxt
     return None
 
-def _copy_tree(src: Path, dest: Path) -> None:
-    dest.mkdir(parents=True, exist_ok=True)
-    for item in src.iterdir():
-        target = dest / item.name
-        if item.is_dir():
-            shutil.copytree(item, target, dirs_exist_ok=True)
-        elif not target.exists():
-            shutil.copy2(item, target)
+lol_target = DATA_RAW / "LOLv2"
+target_test_file = lol_target / "Real_captured" / "Train" / "Normal" / "normal00567.png"
 
-def _extract_zip(zip_path: Path, dest_name: str) -> None:
-    print(f"📦 Décompression de {zip_path.name}...")
-    dest = Path("data/raw") / dest_name
-    with zipfile.ZipFile(zip_path, "r") as z:
-        first_entry = z.namelist()[0].strip("/")
-        if first_entry == dest_name or first_entry.startswith(dest_name + "/"):
-            z.extractall("data/raw")
-        else:
-            z.extractall(dest)
-    nested = dest / dest_name
-    if nested.exists():
+# Vérification : si les images ne sont pas encore sur le SSD Colab, on décompresse le ZIP
+if not target_test_file.exists():
+    print("🔍 Recherche de l'archive LOLv2.zip sur Google Drive...")
+    lol_zip = find_zip_on_drive("lol")
+    
+    if lol_zip is None:
+        print("\n" + "="*70)
+        print("❌ ERREUR : Impossible de localiser 'LOLv2.zip' sur votre Google Drive !")
+        print("="*70)
+        print(f"Dossiers scannés :")
+        print(f"  - {GDRIVE_DIR}")
+        print(f"  - {drive_root}")
+        print("\n👉 ACTION REQUISE :")
+        print("   Vérifiez que votre fichier 'LOLv2.zip' est bien déposé dans votre Google Drive,")
+        print(f"   de préférence dans le dossier du projet : {GDRIVE_DIR}")
+        print("="*70 + "\n")
+        raise FileNotFoundError("LOLv2.zip introuvable sur Google Drive. Téléversez le fichier puis relancez.")
+
+    print(f"📦 Archive trouvée : {lol_zip}")
+    print("⚡ Décompression en cours vers le SSD local temporaire de Colab...")
+    # Décompression rapide via la commande système unzip
+    !unzip -q -o "{str(lol_zip)}" -d "{str(DATA_RAW)}"
+    
+    # Correction automatique de toute imbrication (ex: LOLv2/LOLv2 -> LOLv2)
+    nested = lol_target / "LOLv2"
+    if nested.exists() and nested.is_dir():
         for item in nested.iterdir():
-            target = dest / item.name
-            if not target.exists():
-                shutil.move(str(item), str(target))
+            shutil.move(str(item), str(lol_target / item.name))
         try:
             nested.rmdir()
-        except OSError:
+        except Exception:
             pass
 
-# LOL-v2 : lu dans le dossier Drive unique, copié seulement sur le SSD Colab (session temporaire).
-lol_src = _find_root(GDRIVE_DIR, "LOLv2", ("Real_captured/Train/Low", "Real_captured", "Low"))
-lol_local = Path("data/raw/LOLv2")
-lol_ready_marker = lol_local / "Real_captured" / "Train" / "Low"
-if not lol_ready_marker.exists() and not (lol_local / "Low").exists():
-    if lol_src is not None:
-        print("📂 LOL-v2 trouvé dans", lol_src)
-        print("   Copie temporaire vers le SSD Colab pour l'entraînement (le dossier Drive n'est pas dupliqué).")
-        _copy_tree(lol_src, lol_local)
-    else:
-        lol_zip = _find_zip(GDRIVE_DIR, "lol")
-        if lol_zip is not None:
-            _extract_zip(lol_zip, "LOLv2")
+    # Si le ZIP a extrait directement 'Real_captured' sans dossier 'LOLv2'
+    flat_real = DATA_RAW / "Real_captured"
+    if flat_real.exists() and not (lol_target / "Real_captured").exists():
+        lol_target.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(flat_real), str(lol_target / "Real_captured"))
 
-# ExDark : même dossier Drive.
-exdark_src = _find_root(GDRIVE_DIR, "ExDark", ("Bicycle", "Car", "People", "Images"))
-exdark_local = Path("data/raw/ExDark")
-if not (exdark_local / "Bicycle").exists() and not (exdark_local / "Car").exists():
-    if exdark_src is not None:
-        print("📂 ExDark trouvé dans", exdark_src)
-        _copy_tree(exdark_src, exdark_local)
-    else:
-        exdark_zip = _find_zip(GDRIVE_DIR, "exdark")
-        if exdark_zip is not None:
-            _extract_zip(exdark_zip, "ExDark")
+# Décompression optionnelle pour ExDark
+exdark_target = DATA_RAW / "ExDark"
+if not (exdark_target / "Bicycle").exists():
+    exdark_zip = find_zip_on_drive("exdark")
+    if exdark_zip:
+        print(f"📦 Archive ExDark trouvée : {exdark_zip.name}")
+        !unzip -q -o "{str(exdark_zip)}" -d "{str(DATA_RAW)}"
+        nested_ex = exdark_target / "ExDark"
+        if nested_ex.exists() and nested_ex.is_dir():
+            for item in nested_ex.iterdir():
+                shutil.move(str(item), str(exdark_target / item.name))
+            try:
+                nested_ex.rmdir()
+            except Exception:
+                pass
 
-lol_ready = (lol_local / "Real_captured" / "Train" / "Low").exists() or (lol_local / "Low").exists()
-exdark_ready = (exdark_local / "Bicycle").exists() or (exdark_local / "Car").exists()
-print("Statut LOL-v2 :", "✅ Détecté et prêt" if lol_ready else "⚠️ Non détecté dans " + str(GDRIVE_DIR))
-print("Statut ExDark :", "✅ Détecté et prêt" if exdark_ready else "⚠️ Non détecté dans " + str(GDRIVE_DIR))
-if not lol_ready:
-    print("Structure attendue dans le dossier unique :")
-    print("  nightvision-gen/LOLv2/Real_captured/Train/Low")
-    print("  nightvision-gen/ExDark/Bicycle")
-    print("  nightvision-gen/checkpoints  |  logs  |  generated_images")"""),
+# Bilan et validation formelle de la présence des fichiers
+train_low_count = len(list((lol_target / "Real_captured" / "Train" / "Low").glob("*.png")))
+train_norm_count = len(list((lol_target / "Real_captured" / "Train" / "Normal").glob("*.png")))
+test_low_count = len(list((lol_target / "Real_captured" / "Test" / "Low").glob("*.png")))
+
+print("\n" + "="*55)
+print("📊 BILAN DU DATASET LOL-v2 SUR LE SSD COLAB :")
+print(f"  • Images sombres (Train Low)     : {train_low_count} fichiers")
+print(f"  • Images normales (Train Normal) : {train_norm_count} fichiers")
+print(f"  • Images de test réel (Test Low) : {test_low_count} fichiers")
+
+if target_test_file.exists():
+    print(f"  • Vérification : ✅ normal00567.png est bien présent !")
+    print("="*55)
+    print("🎉 Toutes les images sont prêtes pour l'entraînement !")
+else:
+    print(f"  • ⚠️ Attention : {target_test_file} est introuvable.")
+    print("="*55)
+    raise FileNotFoundError("Les images LOL-v2 n'ont pas pu être vérifiées sur le SSD local.")"""),
         code_cell("""# 5. Sélection de la variante du modèle à entraîner
 # @title Configuration de l'Expérience { run: "auto" }
 MODEL_VARIANT = "A" # @param ["A", "B", "C"]
@@ -578,30 +578,57 @@ from nightvision.data.dataset import LOLv2PatchDataset, SyntheticPairDataset
 
 compute_retinex = MODEL_VARIANT in ("B", "C")
 manifest_path = Path("data/processed/lol_v2_splits.json")
+lol_root = Path("data/raw/LOLv2")
+
+print("Découverte des paires réellement présentes dans", lol_root)
+lol_mgr = LOLv2SplitManager(root_dir=lol_root, seed=42)
+disk_splits = lol_mgr.create_splits()
+disk_by_id = {}
+for split_pairs in disk_splits.values():
+    for pair in split_pairs:
+        disk_by_id[pair.pair_id] = pair
 
 train_pairs = []
 val_pairs = []
+used_ids = set()
 
-if manifest_path.exists():
-    print("Lecture du manifeste :", manifest_path)
-    splits = LOLv2SplitManager.load_split_manifest(manifest_path, root_dir="data/raw/LOLv2")
-    train_pairs = splits.get("train", [])
-    val_pairs = splits.get("val", [])
+if manifest_path.exists() and disk_by_id:
+    print("Alignement sur le manifeste :", manifest_path)
+    manifest = LOLv2SplitManager.load_split_manifest(manifest_path, root_dir=lol_root)
+    missing = 0
+    for split_name, bucket in (("train", train_pairs), ("val", val_pairs)):
+        for item in manifest.get(split_name, []):
+            pair = disk_by_id.get(item.pair_id)
+            if pair is None or not (Path(pair.low_path).is_file() and Path(pair.normal_path).is_file()):
+                missing += 1
+                continue
+            bucket.append(pair)
+            used_ids.add(pair.pair_id)
+    if missing:
+        print(f"⚠️ {missing} paires du manifeste ignorées : image sombre ou référence absente.")
+    extra_train = [p for p in disk_splits.get("train", []) if p.pair_id not in used_ids]
+    extra_val = [p for p in disk_splits.get("val", []) if p.pair_id not in used_ids]
+    if extra_train or extra_val:
+        print(f"ℹ️ {len(extra_train) + len(extra_val)} paires trouvées sur le disque et ajoutées.")
+        train_pairs.extend(extra_train)
+        val_pairs.extend(extra_val)
+else:
+    train_pairs = list(disk_splits.get("train", []))
+    val_pairs = list(disk_splits.get("val", []))
 
-# Vérifier si les chemins pointent vers des fichiers réels existants
-if not train_pairs or not Path(train_pairs[0].low_path).exists():
-    print("Découverte dynamique des paires LOL-v2 depuis data/raw/LOLv2...")
-    lol_mgr = LOLv2SplitManager(root_dir="data/raw/LOLv2", seed=42)
-    splits = lol_mgr.create_splits()
-    train_pairs = splits.get("train", [])
-    val_pairs = splits.get("val", [])
+def _both_exist(pair) -> bool:
+    return Path(pair.low_path).is_file() and Path(pair.normal_path).is_file()
 
-if len(train_pairs) > 0 and Path(train_pairs[0].low_path).exists():
+train_pairs = [p for p in train_pairs if _both_exist(p)]
+val_pairs = [p for p in val_pairs if _both_exist(p)]
+
+if train_pairs:
     print(f"✅ Dataset réel LOL-v2 opérationnel : {len(train_pairs)} paires train, {len(val_pairs)} paires val.")
     train_ds = LOLv2PatchDataset(train_pairs, patch_size=128, patches_per_image=4, is_train=True, compute_retinex=compute_retinex)
     val_ds = LOLv2PatchDataset(val_pairs, patch_size=128, patches_per_image=2, is_train=False, compute_retinex=compute_retinex)
 else:
-    print("⚠️ Images LOL-v2 réelles non disponibles. Utilisation du dataset synthétique.")
+    print("⚠️ Aucune paire LOL-v2 complète (Low + Normal). Utilisation du dataset synthétique.")
+    print("   Vérifiez data/raw/LOLv2/Real_captured/Train/Low et Train/Normal.")
     train_ds = SyntheticPairDataset(32, image_size=128, compute_retinex=compute_retinex)
     val_ds = SyntheticPairDataset(8, image_size=128, compute_retinex=compute_retinex)
 

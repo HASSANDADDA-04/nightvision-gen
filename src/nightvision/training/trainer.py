@@ -155,7 +155,7 @@ class Trainer:
         # 8. Mixed precision & Gradient clipping
         mixed_prec = train_cfg.get("mixed_precision", "fp16").lower()
         self.use_amp = mixed_prec == "fp16" and self.device.type == "cuda"
-        self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
+        self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
         self.grad_clip = float(train_cfg.get("gradient_clip_val", 1.0))
 
         # 9. EMA
@@ -230,7 +230,7 @@ class Trainer:
 
             self.optimizer.zero_grad()
 
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
+            with torch.amp.autocast("cuda", enabled=self.use_amp):
                 # Predict noise
                 noise_pred = self.model(unet_in, t)
 
@@ -299,7 +299,7 @@ class Trainer:
             x_noisy = self.diffusion.q_sample(x_start=normal, t=t, noise=noise)
             unet_in = self.conditioning_mgr.prepare_unet_input(x_noisy, low, illum)
 
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
+            with torch.amp.autocast("cuda", enabled=self.use_amp):
                 noise_pred = self.model(unet_in, t)
                 pred_x0 = None
                 if self.loss_fn.edge_loss.lambda_edge > 0.0:

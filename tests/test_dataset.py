@@ -1,5 +1,7 @@
 """Unit tests for dataset loading, partitioning, and patch sampling."""
 
+from pathlib import Path
+
 import torch
 from PIL import Image
 
@@ -65,3 +67,25 @@ def test_split_manager_pairing(tmp_path):
     assert len(pairs) == 5
     pair_ids = {p.pair_id for p in pairs}
     assert pair_ids == {"0", "1", "2", "3", "4"}
+
+
+def test_split_manager_pairs_prefixed_names(tmp_path):
+    """Match low00001.png with normal00001.png, including same names in both folders."""
+    low_dir = tmp_path / "Low"
+    norm_dir = tmp_path / "Normal"
+    low_dir.mkdir()
+    norm_dir.mkdir()
+
+    Image.new("RGB", (8, 8)).save(low_dir / "low00567.png")
+    Image.new("RGB", (8, 8)).save(norm_dir / "normal00567.png")
+    Image.new("RGB", (8, 8)).save(low_dir / "low00002.png")
+    Image.new("RGB", (8, 8)).save(norm_dir / "low00002.png")
+    Image.new("RGB", (8, 8)).save(low_dir / "low00003.png")
+
+    mgr = LOLv2SplitManager(root_dir=tmp_path, seed=42)
+    pairs = mgr.discover_pairs(low_dir, norm_dir)
+    by_id = {p.pair_id: Path(p.normal_path).name for p in pairs}
+
+    assert by_id["low00567"] == "normal00567.png"
+    assert by_id["low00002"] == "low00002.png"
+    assert "low00003" not in by_id

@@ -97,37 +97,48 @@ class LOLv2SplitManager:
             if f.is_file() and f.suffix.lower() in extensions
         }
 
-        matched_pairs: list[ImagePair] = []
+        def _pair_key(stem: str) -> str:
+            cleaned = stem.lower()
+            for token in ("normal", "high", "low", "dark"):
+                cleaned = cleaned.replace(token, "")
+            cleaned = cleaned.strip(" _-")
+            if cleaned.isdigit():
+                return str(int(cleaned))
+            return cleaned
 
-        # Attempt exact stem match first
+        normal_by_key: dict[str, Path] = {}
+        for stem, path in normal_files.items():
+            normal_by_key.setdefault(_pair_key(stem), path)
+
+        matched_pairs: list[ImagePair] = []
+        used_normals: set[Path] = set()
+        unmatched_names: list[str] = []
+
         for stem, low_path in low_files.items():
-            if stem in normal_files:
-                matched_pairs.append(
-                    ImagePair(
-                        pair_id=stem,
-                        low_path=str(low_path.resolve()),
-                        normal_path=str(normal_files[stem].resolve()),
-                    )
+            candidate = normal_files.get(stem)
+            if candidate is None or candidate in used_normals:
+                key = _pair_key(stem)
+                candidate = normal_by_key.get(key) if key else None
+                if candidate in used_normals:
+                    candidate = None
+            if candidate is None:
+                unmatched_names.append(low_path.name)
+                continue
+            used_normals.add(candidate)
+            matched_pairs.append(
+                ImagePair(
+                    pair_id=stem,
+                    low_path=str(low_path.resolve()),
+                    normal_path=str(candidate.resolve()),
                 )
-            else:
-                # Secondary heuristic: strip leading 'low' / 'normal' prefixes
-                clean_stem = stem.lower().replace("low", "").replace("dark", "").strip("_ -")
-                candidate = None
-                for n_stem, n_path in normal_files.items():
-                    n_clean = n_stem.lower().replace("normal", "").replace("high", "").strip("_ -")
-                    if clean_stem == n_clean:
-                        candidate = n_path
-                        break
-                if candidate is not None:
-                    matched_pairs.append(
-                        ImagePair(
-                            pair_id=stem,
-                            low_path=str(low_path.resolve()),
-                            normal_path=str(candidate.resolve()),
-                        )
-                    )
-                else:
-                    logger.debug("Unmatched low-light image: %s", low_path.name)
+            )
+
+        if unmatched_names:
+            logger.warning(
+                "%d low-light images have no reference and will be skipped. Examples: %s",
+                len(unmatched_names),
+                ", ".join(unmatched_names[:5]),
+            )
 
         matched_pairs.sort(key=lambda p: p.pair_id)
         return matched_pairs
