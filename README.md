@@ -126,7 +126,7 @@ Le développement du code source est effectué en local, tandis que les entraîn
 1. Ouvrez le notebook : [`notebooks/04_train_ddpm_colab.ipynb`](notebooks/04_train_ddpm_colab.ipynb).
 2. Activez l'accélérateur GPU : **Exécution > Modifier le type d'exécution > T4 GPU**.
 3. Exécutez les cellules séquentiellement :
-   - Montage de Google Drive (`/content/drive/MyDrive/NightVision_Gen`).
+   - Montage de Google Drive : un seul dossier `MyDrive/nightvision-gen` (datasets LOL-v2 et ExDark, checkpoints, logs et images générées).
    - Clonage automatique du dépôt GitHub.
    - Sélection du modèle à entraîner (**A**, **B** ou **C**) via le formulaire interactif.
    - Entraînement depuis zéro avec sauvegarde automatique des checkpoints (`checkpoint_best.pt`, `checkpoint_latest.pt`) sur Google Drive.

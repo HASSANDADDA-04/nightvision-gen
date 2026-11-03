@@ -336,15 +336,45 @@ if torch.cuda.is_available():
     print("Mémoire VRAM    :", round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 2), "Go")
 else:
     print("⚠️ Aucun GPU détecté. Activez l'accélérateur GPU dans Exécution > Modifier le type d'exécution.")"""),
-        code_cell("""# 2. Montage de Google Drive pour la persistance des checkpoints
+        code_cell("""# 2. Montage de Google Drive — un seul dossier pour les datasets et les résultats
 from google.colab import drive
-import os
 from pathlib import Path
 
 drive.mount('/content/drive')
-GDRIVE_DIR = Path('/content/drive/MyDrive/NightVision_Gen')
-GDRIVE_DIR.mkdir(parents=True, exist_ok=True)
-print("✅ Google Drive monté avec succès :", GDRIVE_DIR)"""),
+DRIVE_ROOT = Path('/content/drive/MyDrive')
+
+def _is_project_folder(name: str) -> bool:
+    key = name.lower().replace('_', '-').replace(' ', '')
+    return key in {'nightvision-gen', 'nightvisiongen'}
+
+def _contains_datasets(folder: Path) -> bool:
+    markers = (
+        'LOLv2', 'ExDark',
+        'data/LOLv2', 'data/ExDark',
+        'data/raw/LOLv2', 'data/raw/ExDark',
+    )
+    return any((folder / rel).exists() for rel in markers)
+
+candidates = []
+if DRIVE_ROOT.exists():
+    candidates = [p for p in DRIVE_ROOT.iterdir() if p.is_dir() and _is_project_folder(p.name)]
+
+with_data = [p for p in candidates if _contains_datasets(p)]
+pool = with_data or candidates
+if pool:
+    # Préfère le dossier qui contient déjà LOLv2 / ExDark, puis le nom exact nightvision-gen.
+    GDRIVE_DIR = sorted(pool, key=lambda p: (p.name != 'nightvision-gen', len(p.name)))[0]
+else:
+    GDRIVE_DIR = DRIVE_ROOT / 'nightvision-gen'
+    GDRIVE_DIR.mkdir(parents=True, exist_ok=True)
+
+duplicates = [p for p in candidates if p.resolve() != GDRIVE_DIR.resolve()]
+print('✅ Dossier unique du projet :', GDRIVE_DIR)
+print('   Datasets, checkpoints, logs et images générées restent dans ce dossier.')
+if duplicates:
+    print('⚠️ Dossiers en double ignorés. Déplacez leur contenu dans le dossier unique, puis supprimez-les :')
+    for dup in duplicates:
+        print('   -', dup)"""),
         code_cell("""# 3. Clone du dépôt GitHub Public et installation du package
 import os, sys
 from pathlib import Path
@@ -388,72 +418,116 @@ except ModuleNotFoundError:
     print("\n⚠️ Note Colab : Pour finaliser l'enregistrement dans Python 3.13 :")
     print("👉 Allez dans le menu : Exécution > Redémarrer la session (Runtime > Restart session)")
     print("👉 Puis relancez cette cellule : l'import sera immédiat !")"""),
-        code_cell("""# 4. Configuration des chemins et accès aux datasets LOL-v2 et ExDark
-import sys, os, zipfile, shutil
+        code_cell("""# 4. Accès aux datasets déjà présents dans le dossier unique du Drive
+import sys, zipfile, shutil
 from pathlib import Path
 sys.path.append(str(Path("/content/nightvision-gen/src").resolve()))
 
-# Création des dossiers nécessaires
-!mkdir -p artifacts/checkpoints artifacts/logs artifacts/generated_images
-!mkdir -p data/raw/LOLv2 data/raw/ExDark data/processed
+Path("artifacts/checkpoints").mkdir(parents=True, exist_ok=True)
+Path("artifacts/logs").mkdir(parents=True, exist_ok=True)
+Path("artifacts/generated_images").mkdir(parents=True, exist_ok=True)
+Path("data/raw/LOLv2").mkdir(parents=True, exist_ok=True)
+Path("data/raw/ExDark").mkdir(parents=True, exist_ok=True)
+Path("data/processed").mkdir(parents=True, exist_ok=True)
 
-# Recherche et décompression automatique des archives ZIP depuis Google Drive
-drive_lol_zip = list(GDRIVE_DIR.rglob("*LOL*.zip")) + list(GDRIVE_DIR.rglob("*lol*.zip"))
-if drive_lol_zip and not (Path("data/raw/LOLv2/Real_captured").exists()):
-    print(f"📦 Décompression automatique de {drive_lol_zip[0].name} depuis Google Drive...")
-    with zipfile.ZipFile(drive_lol_zip[0], 'r') as z:
-        first_entry = z.namelist()[0].strip('/')
-        if first_entry == "LOLv2" or first_entry.startswith("LOLv2/"):
+def _find_root(base: Path, folder_name: str, markers: tuple[str, ...]) -> Path | None:
+    probes = [
+        base / "data" / "raw" / folder_name,
+        base / "data" / folder_name,
+        base / "raw" / folder_name,
+        base / folder_name,
+        base / "datasets" / folder_name,
+    ]
+    seen = []
+    for probe in probes:
+        seen.extend((probe, probe / folder_name))
+    for cand in seen:
+        if any((cand / marker).is_dir() for marker in markers):
+            return cand
+    return None
+
+def _find_zip(base: Path, needle: str) -> Path | None:
+    skip = {"LOLv2", "ExDark", "checkpoints", "logs", "generated_images", "data", "artifacts"}
+    levels = [base]
+    for depth in range(3):
+        nxt = []
+        for folder in levels:
+            try:
+                children = list(folder.iterdir())
+            except OSError:
+                continue
+            for child in children:
+                if child.is_file() and child.suffix.lower() == ".zip" and needle in child.name.lower():
+                    return child
+                if child.is_dir() and depth < 2 and child.name not in skip:
+                    nxt.append(child)
+        levels = nxt
+    return None
+
+def _copy_tree(src: Path, dest: Path) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    for item in src.iterdir():
+        target = dest / item.name
+        if item.is_dir():
+            shutil.copytree(item, target, dirs_exist_ok=True)
+        elif not target.exists():
+            shutil.copy2(item, target)
+
+def _extract_zip(zip_path: Path, dest_name: str) -> None:
+    print(f"📦 Décompression de {zip_path.name}...")
+    dest = Path("data/raw") / dest_name
+    with zipfile.ZipFile(zip_path, "r") as z:
+        first_entry = z.namelist()[0].strip("/")
+        if first_entry == dest_name or first_entry.startswith(dest_name + "/"):
             z.extractall("data/raw")
         else:
-            z.extractall("data/raw/LOLv2")
-
-    nested_lol = Path("data/raw/LOLv2/LOLv2")
-    if nested_lol.exists():
-        for item in nested_lol.iterdir():
-            dest = Path("data/raw/LOLv2") / item.name
-            if not dest.exists():
-                shutil.move(str(item), str(dest))
+            z.extractall(dest)
+    nested = dest / dest_name
+    if nested.exists():
+        for item in nested.iterdir():
+            target = dest / item.name
+            if not target.exists():
+                shutil.move(str(item), str(target))
         try:
-            nested_lol.rmdir()
-        except Exception:
+            nested.rmdir()
+        except OSError:
             pass
 
-    print("✅ LOL-v2 est prêt sur Colab !")
-elif (GDRIVE_DIR / "data" / "LOLv2").exists() and not (Path("data/raw/LOLv2/Real_captured").exists()):
-    print("📂 Copie de LOL-v2 depuis Drive vers le SSD Colab...")
-    !cp -r /content/drive/MyDrive/NightVision_Gen/data/LOLv2/* data/raw/LOLv2/
-    print("✅ LOL-v2 copié !")
+# LOL-v2 : lu dans le dossier Drive unique, copié seulement sur le SSD Colab (session temporaire).
+lol_src = _find_root(GDRIVE_DIR, "LOLv2", ("Real_captured/Train/Low", "Real_captured", "Low"))
+lol_local = Path("data/raw/LOLv2")
+lol_ready_marker = lol_local / "Real_captured" / "Train" / "Low"
+if not lol_ready_marker.exists() and not (lol_local / "Low").exists():
+    if lol_src is not None:
+        print("📂 LOL-v2 trouvé dans", lol_src)
+        print("   Copie temporaire vers le SSD Colab pour l'entraînement (le dossier Drive n'est pas dupliqué).")
+        _copy_tree(lol_src, lol_local)
+    else:
+        lol_zip = _find_zip(GDRIVE_DIR, "lol")
+        if lol_zip is not None:
+            _extract_zip(lol_zip, "LOLv2")
 
-# Recherche et décompression automatique pour ExDark
-drive_exdark_zip = list(GDRIVE_DIR.rglob("*ExDark*.zip")) + list(GDRIVE_DIR.rglob("*exdark*.zip"))
-if drive_exdark_zip and not (Path("data/raw/ExDark/Bicycle").exists()):
-    print(f"📦 Décompression automatique de {drive_exdark_zip[0].name}...")
-    with zipfile.ZipFile(drive_exdark_zip[0], 'r') as z:
-        first_entry = z.namelist()[0].strip('/')
-        if first_entry == "ExDark" or first_entry.startswith("ExDark/"):
-            z.extractall("data/raw")
-        else:
-            z.extractall("data/raw/ExDark")
+# ExDark : même dossier Drive.
+exdark_src = _find_root(GDRIVE_DIR, "ExDark", ("Bicycle", "Car", "People", "Images"))
+exdark_local = Path("data/raw/ExDark")
+if not (exdark_local / "Bicycle").exists() and not (exdark_local / "Car").exists():
+    if exdark_src is not None:
+        print("📂 ExDark trouvé dans", exdark_src)
+        _copy_tree(exdark_src, exdark_local)
+    else:
+        exdark_zip = _find_zip(GDRIVE_DIR, "exdark")
+        if exdark_zip is not None:
+            _extract_zip(exdark_zip, "ExDark")
 
-    nested_exdark = Path("data/raw/ExDark/ExDark")
-    if nested_exdark.exists():
-        for item in nested_exdark.iterdir():
-            dest = Path("data/raw/ExDark") / item.name
-            if not dest.exists():
-                shutil.move(str(item), str(dest))
-        try:
-            nested_exdark.rmdir()
-        except Exception:
-            pass
-
-    print("✅ ExDark est prêt sur Colab !")
-elif (GDRIVE_DIR / "data" / "ExDark").exists() and not (Path("data/raw/ExDark/Bicycle").exists()):
-    !cp -r /content/drive/MyDrive/NightVision_Gen/data/ExDark/* data/raw/ExDark/
-
-# Vérification finale
-lol_ready = (Path("data/raw/LOLv2/Real_captured/Train/Low").exists() or Path("data/raw/LOLv2/Low").exists())
-print("Statut LOL-v2 :", "✅ Détecté et prêt" if lol_ready else "⚠️ Non détecté (déposez LOLv2.zip dans NightVision_Gen sur Drive)")"""),
+lol_ready = (lol_local / "Real_captured" / "Train" / "Low").exists() or (lol_local / "Low").exists()
+exdark_ready = (exdark_local / "Bicycle").exists() or (exdark_local / "Car").exists()
+print("Statut LOL-v2 :", "✅ Détecté et prêt" if lol_ready else "⚠️ Non détecté dans " + str(GDRIVE_DIR))
+print("Statut ExDark :", "✅ Détecté et prêt" if exdark_ready else "⚠️ Non détecté dans " + str(GDRIVE_DIR))
+if not lol_ready:
+    print("Structure attendue dans le dossier unique :")
+    print("  nightvision-gen/LOLv2/Real_captured/Train/Low")
+    print("  nightvision-gen/ExDark/Bicycle")
+    print("  nightvision-gen/checkpoints  |  logs  |  generated_images")"""),
         code_cell("""# 5. Sélection de la variante du modèle à entraîner
 # @title Configuration de l'Expérience { run: "auto" }
 MODEL_VARIANT = "A" # @param ["A", "B", "C"]
