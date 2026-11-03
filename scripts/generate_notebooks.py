@@ -365,19 +365,29 @@ else:
 
 %cd /content/nightvision-gen
 
-# Installation des dépendances et du package en mode éditable
+# Installation des dépendances et installation physique du package
 print("📦 Installation des dépendances Colab...")
 !pip install -r requirements-colab.txt
-print("📦 Installation du package nightvision en mode éditable...")
-!pip install -e . --no-build-isolation
+print("📦 Installation standard du package nightvision...")
+!pip install . --no-build-isolation --no-deps
+
+# Nettoyage et invalidation des caches d'import Python
+import importlib
+sys.modules.pop("nightvision", None)
+importlib.invalidate_caches()
 
 # Enregistrement explicite dans sys.path pour un accès direct immédiat
 src_dir = str(Path("/content/nightvision-gen/src").resolve())
 if src_dir not in sys.path:
     sys.path.insert(0, src_dir)
 
-import nightvision
-print("✅ Package nightvision installé et importé avec succès sur Colab !")"""),
+try:
+    import nightvision
+    print("✅ Package nightvision installé et importé avec succès sur Colab !")
+except ModuleNotFoundError:
+    print("\n⚠️ Note Colab : Pour finaliser l'enregistrement dans Python 3.13 :")
+    print("👉 Allez dans le menu : Exécution > Redémarrer la session (Runtime > Restart session)")
+    print("👉 Puis relancez cette cellule : l'import sera immédiat !")"""),
         code_cell("""# 4. Configuration des chemins et accès aux datasets LOL-v2 et ExDark
 import sys, os, zipfile, shutil
 from pathlib import Path
