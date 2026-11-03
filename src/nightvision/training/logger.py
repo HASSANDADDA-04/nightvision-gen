@@ -47,15 +47,18 @@ class ExperimentLogger:
         """
         self.history.append(epoch_metrics)
 
-        # Write or append to CSV
-        file_exists = self.csv_path.exists()
-        fieldnames = list(epoch_metrics.keys())
+        # Collect union of all keys across all logged epochs to guarantee uniform column count
+        all_fieldnames: list[str] = []
+        for entry in self.history:
+            for k in entry.keys():
+                if k not in all_fieldnames:
+                    all_fieldnames.append(k)
 
-        with open(self.csv_path, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            if not file_exists:
-                writer.writeheader()
-            writer.writerow(epoch_metrics)
+        # Write uniform CSV with all known headers
+        with open(self.csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=all_fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(self.history)
 
         # Update JSON history
         with open(self.json_path, "w", encoding="utf-8") as f:

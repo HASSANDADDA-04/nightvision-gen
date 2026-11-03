@@ -549,19 +549,40 @@ if RESUME_TRAINING and latest_ckpt.exists():
 print(f"🚀 Démarrage de l'entraînement du Modèle {MODEL_VARIANT} depuis zéro...")
 trainer.train()"""),
         code_cell("""# 9. Visualisation des Courbes d'Apprentissage et du Dernier Aperçu
+import json
 import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image
 
 log_dir_path = Path(cfg["paths"]["log_dir"])
-history_files = list(log_dir_path.glob("*_metrics.csv")) + list(Path("artifacts/logs").rglob("*_metrics.csv"))
 
-if history_files:
-    df = pd.read_csv(history_files[0])
+# Chargement robuste : tentative prioritaire via JSON (structure parfaite), repli sur CSV sécurisé
+json_files = list(log_dir_path.glob("*_history.json")) + list(Path("artifacts/logs").rglob("*_history.json"))
+csv_files = list(log_dir_path.glob("*_metrics.csv")) + list(Path("artifacts/logs").rglob("*_metrics.csv"))
+
+df = None
+if json_files and json_files[0].exists():
+    try:
+        with open(json_files[0], "r", encoding="utf-8") as f:
+            data = json.load(f)
+        df = pd.DataFrame(data)
+    except Exception:
+        pass
+
+if df is None and csv_files and csv_files[0].exists():
+    try:
+        df = pd.read_csv(csv_files[0], on_bad_lines="skip")
+    except Exception as e:
+        print("Erreur lecture CSV :", e)
+
+if df is not None and not df.empty:
     plt.figure(figsize=(10, 4))
-    plt.plot(df["epoch"], df["train_loss"], label="Perte Entraînement (Train)", color="#3b82f6", lw=2)
-    if "val_loss" in df.columns:
-        plt.plot(df["epoch"], df["val_loss"], label="Perte Validation", color="#ef4444", lw=2)
+    if "epoch" in df.columns and "train_loss" in df.columns:
+        plt.plot(df["epoch"], df["train_loss"], label="Perte Entraînement (Train)", color="#3b82f6", lw=2)
+    if "epoch" in df.columns and "val_loss" in df.columns:
+        val_df = df.dropna(subset=["val_loss"])
+        if not val_df.empty:
+            plt.plot(val_df["epoch"], val_df["val_loss"], label="Perte Validation (Val)", color="#ef4444", lw=2, marker="o")
     plt.xlabel("Époque")
     plt.ylabel("Perte")
     plt.title(f"Historique d'Entraînement — Modèle {MODEL_VARIANT}")
