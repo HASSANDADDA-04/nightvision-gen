@@ -336,45 +336,66 @@ if torch.cuda.is_available():
     print("Mémoire VRAM    :", round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 2), "Go")
 else:
     print("⚠️ Aucun GPU détecté. Activez l'accélérateur GPU dans Exécution > Modifier le type d'exécution.")"""),
-        code_cell("""# 2. Montage de Google Drive — un seul dossier pour les datasets et les résultats
+        code_cell("""# 2. Montage de Google Drive — Détection automatique du dossier du projet
 from google.colab import drive
 from pathlib import Path
+import re
 
 drive.mount('/content/drive')
 DRIVE_ROOT = Path('/content/drive/MyDrive')
 
-def _is_project_folder(name: str) -> bool:
-    key = name.lower().replace('_', '-').replace(' ', '')
-    return key in {'nightvision-gen', 'nightvisiongen'}
+# Détection intelligente du dossier du projet dans Google Drive
+# L'utilisateur place directement 'LOL V2.zip' et 'ExDark.zip' dans son dossier Drive
+# (ex: 'night vision-gen 2', 'night-vision-gen-2', etc.) sans arborescence data/raw/
+detected_dir = None
+all_drive_dirs = [p for p in DRIVE_ROOT.iterdir() if p.is_dir() and not p.name.startswith('.')]
 
-def _contains_datasets(folder: Path) -> bool:
-    markers = (
-        'LOLv2', 'ExDark',
-        'data/LOLv2', 'data/ExDark',
-        'data/raw/LOLv2', 'data/raw/ExDark',
-    )
-    return any((folder / rel).exists() for rel in markers)
+# Étape A (Priorité absolue) : Trouver le dossier Drive contenant directement le zip de LOL
+# Supporte tous les nommages : 'LOL V2.zip', 'LOLv2.zip', 'lol v2.zip', 'LOL_v2.zip', etc.
+for folder in all_drive_dirs:
+    try:
+        zips = [f.name.lower() for f in folder.glob("*.zip")]
+        if any("lol" in z for z in zips):
+            detected_dir = folder
+            break
+    except Exception:
+        continue
 
-candidates = []
-if DRIVE_ROOT.exists():
-    candidates = [p for p in DRIVE_ROOT.iterdir() if p.is_dir() and _is_project_folder(p.name)]
+# Étape B : Si aucun zip direct, chercher par nom du dossier
+# Tolère 'night vision-gen 2', 'night-vision-gen-2', 'nightvision-gen', etc.
+if detected_dir is None:
+    for folder in all_drive_dirs:
+        clean = re.sub(r'[^a-z0-9]', '', folder.name.lower())
+        if ("night" in clean and "vision" in clean) or "nightvision" in clean:
+            detected_dir = folder
+            break
 
-with_data = [p for p in candidates if _contains_datasets(p)]
-pool = with_data or candidates
-if pool:
-    # Préfère le dossier qui contient déjà LOLv2 / ExDark, puis le nom exact nightvision-gen.
-    GDRIVE_DIR = sorted(pool, key=lambda p: (p.name != 'nightvision-gen', len(p.name)))[0]
+# Étape C : Fallback
+if detected_dir is None:
+    detected_dir = DRIVE_ROOT / "night vision-gen 2"
+    detected_dir.mkdir(parents=True, exist_ok=True)
+
+GDRIVE_DIR = detected_dir
+
+# Création des sous-dossiers de sortie dans le dossier Drive de l'utilisateur
+# pour qu'il puisse récupérer facilement checkpoints et métriques sur sa machine locale
+(GDRIVE_DIR / "checkpoints").mkdir(parents=True, exist_ok=True)
+(GDRIVE_DIR / "logs").mkdir(parents=True, exist_ok=True)
+(GDRIVE_DIR / "generated_images").mkdir(parents=True, exist_ok=True)
+
+print("=" * 70)
+print(f"✅ Dossier Google Drive sélectionné : '{GDRIVE_DIR.name}'")
+print(f"📁 Chemin complet : {GDRIVE_DIR}")
+
+direct_zips = [f.name for f in GDRIVE_DIR.glob("*.zip")]
+if direct_zips:
+    print(f"📦 Datasets zippés trouvés directement dans ce dossier : {direct_zips}")
 else:
-    GDRIVE_DIR = DRIVE_ROOT / 'nightvision-gen'
-    GDRIVE_DIR.mkdir(parents=True, exist_ok=True)
+    print("ℹ️ Aucun .zip trouvé directement à la racine de ce dossier.")
+    print("   (La cellule 4 effectuera une recherche approfondie si besoin).")
 
-duplicates = [p for p in candidates if p.resolve() != GDRIVE_DIR.resolve()]
-print('✅ Dossier unique du projet :', GDRIVE_DIR)
-print('   Datasets, checkpoints, logs et images générées restent dans ce dossier.')
-if duplicates:
-    print('⚠️ Dossiers en double ignorés. Déplacez leur contenu dans le dossier unique, puis supprimez-les :')
-    for dup in duplicates:
-        print('   -', dup)"""),
+print("📂 Les checkpoints, logs et aperçus seront sauvegardés directement ici.")
+print("=" * 70)"""),
         code_cell("""# 3. Clone du dépôt GitHub Public et installation du package
 import os, sys
 from pathlib import Path
@@ -419,115 +440,170 @@ except ModuleNotFoundError:
     print("👉 Allez dans le menu : Exécution > Redémarrer la session (Runtime > Restart session)")
     print("👉 Puis relancez cette cellule : l'import sera immédiat !")"""),
         code_cell("""# 4. Décompression et préparation des datasets depuis Google Drive vers le SSD rapide de Colab
-import os, sys, shutil, zipfile
+# Google Drive ne contient QUE les zips ('LOL V2.zip', 'ExDark.zip') sans arborescence data/raw/.
+# Cette cellule extrait l'archive et reconstruit automatiquement l'arborescence
+# standard attendue par le code sur le SSD local temporaire de Colab.
+import os, sys, shutil
 from pathlib import Path
 
-DATA_RAW = Path("/content/nightvision-gen/data/raw")
+REPO_ROOT = Path("/content/nightvision-gen")
+DATA_RAW = REPO_ROOT / "data/raw"
+LOL_ROOT = DATA_RAW / "LOLv2"
+EXDARK_ROOT = DATA_RAW / "ExDark"
+
 DATA_RAW.mkdir(parents=True, exist_ok=True)
-Path("/content/nightvision-gen/artifacts/checkpoints").mkdir(parents=True, exist_ok=True)
-Path("/content/nightvision-gen/artifacts/logs").mkdir(parents=True, exist_ok=True)
-Path("/content/nightvision-gen/artifacts/generated_images").mkdir(parents=True, exist_ok=True)
+LOL_ROOT.mkdir(parents=True, exist_ok=True)
+EXDARK_ROOT.mkdir(parents=True, exist_ok=True)
+
+(REPO_ROOT / "artifacts/checkpoints").mkdir(parents=True, exist_ok=True)
+(REPO_ROOT / "artifacts/logs").mkdir(parents=True, exist_ok=True)
+(REPO_ROOT / "artifacts/generated_images").mkdir(parents=True, exist_ok=True)
 
 drive_root = Path("/content/drive/MyDrive")
 
-def find_zip_on_drive(pattern: str) -> Path | None:
-    # Recherche intelligente d'une archive zip sur tout Google Drive
+# 1. Recherche tolérante de l'archive LOL-v2 : 'LOL V2.zip', 'LOLv2.zip', 'lol v2.zip', etc.
+def find_lol_archive() -> Path | None:
+    # A. Dans le dossier identifié sur Drive
     if GDRIVE_DIR.exists():
-        for p in GDRIVE_DIR.rglob("*.zip"):
-            if pattern.lower() in p.name.lower():
-                return p
-    # 2. Vérifier à la racine de Mon Drive
-    for p in drive_root.glob("*.zip"):
-        if pattern.lower() in p.name.lower():
-            return p
-    # 3. Recherche élargie dans les sous-dossiers de Mon Drive (profondeur 2)
+        for f in GDRIVE_DIR.iterdir():
+            if f.is_file() and f.suffix.lower() == ".zip" and "lol" in f.name.lower():
+                return f
+        for f in GDRIVE_DIR.rglob("*.zip"):
+            if "lol" in f.name.lower():
+                return f
+
+    # B. Dans tous les autres sous-dossiers de Mon Drive
     for folder in drive_root.iterdir():
         if folder.is_dir() and not folder.name.startswith("."):
             try:
-                for p in folder.glob("*.zip"):
-                    if pattern.lower() in p.name.lower():
-                        return p
+                for f in folder.glob("*.zip"):
+                    if "lol" in f.name.lower():
+                        return f
             except OSError:
                 continue
+
+    # C. À la racine de Mon Drive
+    for f in drive_root.glob("*.zip"):
+        if "lol" in f.name.lower():
+            return f
     return None
 
-lol_target = DATA_RAW / "LOLv2"
-target_test_file = lol_target / "Real_captured" / "Train" / "Normal" / "normal00567.png"
+def find_exdark_archive() -> Path | None:
+    if GDRIVE_DIR.exists():
+        for f in GDRIVE_DIR.iterdir():
+            if f.is_file() and f.suffix.lower() == ".zip" and "exdark" in f.name.lower():
+                return f
+        for f in GDRIVE_DIR.rglob("*.zip"):
+            if "exdark" in f.name.lower():
+                return f
+    for f in drive_root.glob("*.zip"):
+        if "exdark" in f.name.lower():
+            return f
+    return None
 
-# Vérification : si les images ne sont pas encore sur le SSD Colab, on décompresse le ZIP
-if not target_test_file.exists():
-    print("🔍 Recherche de l'archive LOLv2.zip sur Google Drive...")
-    lol_zip = find_zip_on_drive("lol")
-    
+target_test_file = LOL_ROOT / "Real_captured" / "Train" / "Normal" / "normal00567.png"
+png_count = len(list(LOL_ROOT.rglob("*.png")))
+
+# Décompression si le dataset n'est pas encore présent sur le SSD local
+if not target_test_file.exists() or png_count < 100:
+    lol_zip = find_lol_archive()
     if lol_zip is None:
         print("\n" + "="*70)
-        print("❌ ERREUR : Impossible de localiser 'LOLv2.zip' sur votre Google Drive !")
+        print("❌ ERREUR : Archive LOL-v2 introuvable sur Google Drive !")
         print("="*70)
-        print(f"Dossiers scannés :")
-        print(f"  - {GDRIVE_DIR}")
-        print(f"  - {drive_root}")
-        print("\n👉 ACTION REQUISE :")
-        print("   Vérifiez que votre fichier 'LOLv2.zip' est bien déposé dans votre Google Drive,")
-        print(f"   de préférence dans le dossier du projet : {GDRIVE_DIR}")
+        print(f"Dossier inspecté : {GDRIVE_DIR}")
+        print("Contenu actuel du dossier Drive :")
+        for item in GDRIVE_DIR.iterdir():
+            print(f"  - {item.name}")
         print("="*70 + "\n")
-        raise FileNotFoundError("LOLv2.zip introuvable sur Google Drive. Téléversez le fichier puis relancez.")
+        raise FileNotFoundError("Archive 'LOL V2.zip' ou 'LOLv2.zip' introuvable.")
 
-    print(f"📦 Archive trouvée : {lol_zip}")
-    print("⚡ Décompression en cours vers le SSD local temporaire de Colab...")
-    # Décompression rapide via la commande système unzip
-    !unzip -q -o "{str(lol_zip)}" -d "{str(DATA_RAW)}"
-    
-    # Correction automatique de toute imbrication (ex: LOLv2/LOLv2 -> LOLv2)
-    nested = lol_target / "LOLv2"
-    if nested.exists() and nested.is_dir():
-        for item in nested.iterdir():
-            shutil.move(str(item), str(lol_target / item.name))
-        try:
-            nested.rmdir()
-        except Exception:
-            pass
+    print(f"📦 Archive LOL détectée : '{lol_zip.name}'")
+    print(f"📁 Dossier source : {lol_zip.parent}")
+    print("⚡ Décompression vers le SSD local temporaire de Colab...")
 
-    # Si le ZIP a extrait directement 'Real_captured' sans dossier 'LOLv2'
-    flat_real = DATA_RAW / "Real_captured"
-    if flat_real.exists() and not (lol_target / "Real_captured").exists():
-        lol_target.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(flat_real), str(lol_target / "Real_captured"))
+    temp_extract = DATA_RAW / "_temp_extract_lol"
+    if temp_extract.exists():
+        shutil.rmtree(temp_extract)
+    temp_extract.mkdir(parents=True, exist_ok=True)
 
-# Décompression optionnelle pour ExDark
-exdark_target = DATA_RAW / "ExDark"
-if not (exdark_target / "Bicycle").exists():
-    exdark_zip = find_zip_on_drive("exdark")
+    # Décompression système ultra-rapide
+    !unzip -q -o "{str(lol_zip)}" -d "{str(temp_extract)}"
+
+    # Reconstitution automatique de l'arborescence attendue :
+    # LOLv2/Real_captured/{Train,Test}/{Low,Normal}
+    real_candidates = list(temp_extract.rglob("Real_captured"))
+    if real_candidates:
+        real_src = real_candidates[0]
+        dest_real = LOL_ROOT / "Real_captured"
+        if dest_real.exists():
+            shutil.rmtree(dest_real)
+        shutil.move(str(real_src), str(dest_real))
+    else:
+        # Si le zip contient Train et Test sans dossier Real_captured
+        train_candidates = list(temp_extract.rglob("Train"))
+        if train_candidates:
+            dest_real = LOL_ROOT / "Real_captured"
+            dest_real.mkdir(parents=True, exist_ok=True)
+            for sub in ("Train", "Test"):
+                matches = list(temp_extract.rglob(sub))
+                if matches:
+                    dest_sub = dest_real / sub
+                    if dest_sub.exists():
+                        shutil.rmtree(dest_sub)
+                    shutil.move(str(matches[0]), str(dest_sub))
+        else:
+            # Si le zip contient directement Low et Normal
+            low_dirs = [d for d in temp_extract.rglob("Low") if d.is_dir()]
+            norm_dirs = [d for d in temp_extract.rglob("Normal") if d.is_dir()]
+            if low_dirs and norm_dirs:
+                dest_train = LOL_ROOT / "Real_captured" / "Train"
+                dest_train.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(low_dirs[0]), str(dest_train / "Low"))
+                shutil.move(str(norm_dirs[0]), str(dest_train / "Normal"))
+
+    # Nettoyage de l'espace temporaire
+    shutil.rmtree(temp_extract, ignore_errors=True)
+
+# Décompression optionnelle d'ExDark si présent
+if len(list(EXDARK_ROOT.glob("*"))) == 0:
+    exdark_zip = find_exdark_archive()
     if exdark_zip:
-        print(f"📦 Archive ExDark trouvée : {exdark_zip.name}")
-        !unzip -q -o "{str(exdark_zip)}" -d "{str(DATA_RAW)}"
-        nested_ex = exdark_target / "ExDark"
-        if nested_ex.exists() and nested_ex.is_dir():
-            for item in nested_ex.iterdir():
-                shutil.move(str(item), str(exdark_target / item.name))
-            try:
-                nested_ex.rmdir()
-            except Exception:
-                pass
+        print(f"📦 Archive ExDark détectée : '{exdark_zip.name}'")
+        temp_ex = DATA_RAW / "_temp_extract_exdark"
+        temp_ex.mkdir(parents=True, exist_ok=True)
+        !unzip -q -o "{str(exdark_zip)}" -d "{str(temp_ex)}"
+        cls_match = list(temp_ex.rglob("Bicycle"))
+        if cls_match:
+            cls_root = cls_match[0].parent
+            for c_dir in cls_root.iterdir():
+                if c_dir.is_dir():
+                    dest_c = EXDARK_ROOT / c_dir.name
+                    if not dest_c.exists():
+                        shutil.move(str(c_dir), str(dest_c))
+        shutil.rmtree(temp_ex, ignore_errors=True)
 
-# Bilan et validation formelle de la présence des fichiers
-train_low_count = len(list((lol_target / "Real_captured" / "Train" / "Low").glob("*.png")))
-train_norm_count = len(list((lol_target / "Real_captured" / "Train" / "Normal").glob("*.png")))
-test_low_count = len(list((lol_target / "Real_captured" / "Test" / "Low").glob("*.png")))
+# Bilan et comptage des images sur le SSD Colab
+train_low_imgs = list((LOL_ROOT / "Real_captured" / "Train" / "Low").glob("*.*"))
+train_norm_imgs = list((LOL_ROOT / "Real_captured" / "Train" / "Normal").glob("*.*"))
+test_low_imgs = list((LOL_ROOT / "Real_captured" / "Test" / "Low").glob("*.*"))
 
-print("\n" + "="*55)
-print("📊 BILAN DU DATASET LOL-v2 SUR LE SSD COLAB :")
-print(f"  • Images sombres (Train Low)     : {train_low_count} fichiers")
-print(f"  • Images normales (Train Normal) : {train_norm_count} fichiers")
-print(f"  • Images de test réel (Test Low) : {test_low_count} fichiers")
+print("\n" + "="*60)
+print("📊 BILAN DU DATASET LOL-v2 SUR LE SSD LOCAL COLAB :")
+print(f"  • Images sombres (Train Low)     : {len(train_low_imgs)} images")
+print(f"  • Images normales (Train Normal) : {len(train_norm_imgs)} images")
+print(f"  • Images de test réel (Test Low) : {len(test_low_imgs)} images")
 
 if target_test_file.exists():
     print(f"  • Vérification : ✅ normal00567.png est bien présent !")
-    print("="*55)
-    print("🎉 Toutes les images sont prêtes pour l'entraînement !")
+elif train_norm_imgs:
+    print(f"  • Exemple d'image normale trouvée : {train_norm_imgs[0].name}")
+
+print("="*60)
+if len(train_low_imgs) > 0 and len(train_norm_imgs) > 0:
+    print("🎉 Dataset LOL-v2 prêt ! Entraînement possible sans toucher à Google Drive.")
 else:
-    print(f"  • ⚠️ Attention : {target_test_file} est introuvable.")
-    print("="*55)
-    raise FileNotFoundError("Les images LOL-v2 n'ont pas pu être vérifiées sur le SSD local.")"""),
+    raise FileNotFoundError("Échec de la préparation du dataset LOL-v2 sur Colab.")"""),
         code_cell("""# 5. Sélection de la variante du modèle à entraîner
 # @title Configuration de l'Expérience { run: "auto" }
 MODEL_VARIANT = "A" # @param ["A", "B", "C"]
@@ -706,10 +782,34 @@ if preview_imgs:
     plt.title(f"Aperçu Restauration — {last_preview.stem}")
     plt.tight_layout()
     plt.show()"""),
-        code_cell("""# 10. Synchronisation finale sur Google Drive
-!cp -r artifacts/logs/* {str(GDRIVE_DIR)}/logs/ 2>/dev/null || true
-!cp -r artifacts/generated_images/* {str(GDRIVE_DIR)}/generated_images/ 2>/dev/null || true
-print("✅ Checkpoints, logs et aperçus synchronisés sur Google Drive :", GDRIVE_DIR)"""),
+        code_cell("""# 10. Synchronisation et finalisation sur Google Drive
+import shutil
+
+# Sauvegarde supplémentaire pour garantir la persistance des logs et des images
+local_logs = Path("artifacts/logs")
+if local_logs.exists():
+    for f in local_logs.rglob("*.*"):
+        if f.is_file():
+            dest = GDRIVE_DIR / "logs" / f.relative_to(local_logs)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, dest)
+
+local_gen = Path("artifacts/generated_images")
+if local_gen.exists():
+    for f in local_gen.rglob("*.*"):
+        if f.is_file():
+            dest = GDRIVE_DIR / "generated_images" / f.relative_to(local_gen)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, dest)
+
+print("=" * 65)
+print(f"✅ Entraînement et synchronisation réussis dans : '{GDRIVE_DIR.name}'")
+print(f"📁 Contenu disponible dans votre Google Drive :")
+print(f"   • Checkpoints : {GDRIVE_DIR / 'checkpoints'}")
+print(f"   • Métriques   : {GDRIVE_DIR / 'logs'}")
+print(f"   • Aperçus     : {GDRIVE_DIR / 'generated_images'}")
+print(f"👉 Vous pouvez directement copier ces dossiers sur votre machine locale !")
+print("=" * 65)"""),
     ]
     with open(nb_dir / "04_train_ddpm_colab.ipynb", "w", encoding="utf-8") as f:
         json.dump(create_notebook(nb4_cells), f, indent=2)
