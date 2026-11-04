@@ -502,14 +502,14 @@ def find_lol_archive() -> Path | None:
         for root, _, files in os.walk(GDRIVE_DIR):
             for fname in files:
                 fl = fname.lower()
-                if fl.endswith(".zip") and "lol" in fl:
+                if fl.endswith(".zip") and ("lol" in fl or "LOL" in fname):
                     return Path(root) / fname
 
     # B. Directement à la racine de Mon Drive (/content/drive/MyDrive)
     try:
         for fname in os.listdir(drive_root):
             fl = fname.lower()
-            if fl.endswith(".zip") and "lol" in fl:
+            if fl.endswith(".zip") and ("lol" in fl or "LOL" in fname):
                 return drive_root / fname
     except Exception:
         pass
@@ -525,7 +525,7 @@ def find_lol_archive() -> Path | None:
                         continue
                     for fname in files:
                         fl = fname.lower()
-                        if fl.endswith(".zip") and "lol" in fl:
+                        if fl.endswith(".zip") and ("lol" in fl or "LOL" in fname):
                             return Path(root) / fname
             except Exception:
                 continue
@@ -536,12 +536,12 @@ def find_exdark_archive() -> Path | None:
         for root, _, files in os.walk(GDRIVE_DIR):
             for fname in files:
                 fl = fname.lower()
-                if fl.endswith(".zip") and "exdark" in fl:
+                if fl.endswith(".zip") and ("exdark" in fl or "ExDark" in fname):
                     return Path(root) / fname
     try:
         for fname in os.listdir(drive_root):
             fl = fname.lower()
-            if fl.endswith(".zip") and "exdark" in fl:
+            if fl.endswith(".zip") and ("exdark" in fl or "ExDark" in fname):
                 return drive_root / fname
     except Exception:
         pass
@@ -555,7 +555,7 @@ def find_exdark_archive() -> Path | None:
                         continue
                     for fname in files:
                         fl = fname.lower()
-                        if fl.endswith(".zip") and "exdark" in fl:
+                        if fl.endswith(".zip") and ("exdark" in fl or "ExDark" in fname):
                             return Path(root) / fname
             except Exception:
                 continue
@@ -592,7 +592,7 @@ if not target_test_file.exists() or png_count < 100:
             for z in discovered_zips:
                 print(f"  • {z}")
         print("="*70 + "\n")
-        raise FileNotFoundError("Archive 'lol v2.zip' introuvable sur Google Drive.")
+        raise FileNotFoundError("Archive 'lolv2.zip' ou 'lol v2.zip' introuvable sur Google Drive.")
 
     print(f"📦 Archive LOL détectée : '{lol_zip.name}'")
     print(f"📁 Dossier source : {lol_zip.parent}")
