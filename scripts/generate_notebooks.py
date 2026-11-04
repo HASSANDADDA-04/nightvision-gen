@@ -336,65 +336,99 @@ if torch.cuda.is_available():
     print("Mémoire VRAM    :", round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 2), "Go")
 else:
     print("⚠️ Aucun GPU détecté. Activez l'accélérateur GPU dans Exécution > Modifier le type d'exécution.")"""),
-        code_cell("""# 2. Montage de Google Drive — Détection automatique du dossier du projet
+        code_cell("""# 2. Montage de Google Drive — Détection transparente et robuste du dossier du projet
 from google.colab import drive
 from pathlib import Path
-import re
+import os, re
 
 drive.mount('/content/drive')
 DRIVE_ROOT = Path('/content/drive/MyDrive')
 
-# Détection intelligente du dossier du projet dans Google Drive
-# L'utilisateur place directement 'LOL V2.zip' et 'ExDark.zip' dans son dossier Drive
-# (ex: 'night vision-gen 2', 'night-vision-gen-2', etc.) sans arborescence data/raw/
+# @title Configuration du Dossier Google Drive { run: "auto" }
+# Si vous souhaitez forcer un nom de dossier précis sur Drive, indiquez-le ci-dessous.
+# Laissez vide ("") pour une détection automatique intelligente !
+DRIVE_FOLDER_NAME = "" # @param {type:"string"}
+
+def _is_zip(p: Path) -> bool:
+    return p.is_file() and p.name.lower().endswith(".zip")
+
+def _is_lol_archive(p: Path) -> bool:
+    return _is_zip(p) and "lol" in p.name.lower()
+
 detected_dir = None
-all_drive_dirs = [p for p in DRIVE_ROOT.iterdir() if p.is_dir() and not p.name.startswith('.')]
 
-# Étape A (Priorité absolue) : Trouver le dossier Drive contenant directement le zip de LOL
-# Supporte tous les nommages : 'LOL V2.zip', 'LOLv2.zip', 'lol v2.zip', 'LOL_v2.zip', etc.
-for folder in all_drive_dirs:
-    try:
-        zips = [f.name.lower() for f in folder.glob("*.zip")]
-        if any("lol" in z for z in zips):
-            detected_dir = folder
-            break
-    except Exception:
-        continue
+# Étape 1 : Si l'utilisateur a renseigné un nom manuellement dans le formulaire ci-dessus
+if DRIVE_FOLDER_NAME.strip():
+    custom = DRIVE_ROOT / DRIVE_FOLDER_NAME.strip()
+    if custom.exists():
+        detected_dir = custom
 
-# Étape B : Si aucun zip direct, chercher par nom du dossier
-# Tolère 'night vision-gen 2', 'night-vision-gen-2', 'nightvision-gen', etc.
+# Étape 2 : Recherche prioritaire du dossier contenant déjà des checkpoints (pour continuer l'entraînement d'hier !)
 if detected_dir is None:
-    for folder in all_drive_dirs:
-        clean = re.sub(r'[^a-z0-9]', '', folder.name.lower())
-        if ("night" in clean and "vision" in clean) or "nightvision" in clean:
-            detected_dir = folder
+    for folder in DRIVE_ROOT.iterdir():
+        if folder.is_dir() and not folder.name.startswith("."):
+            ckpt_sub = folder / "checkpoints"
+            if ckpt_sub.exists() and list(ckpt_sub.rglob("*.pt")):
+                detected_dir = folder
+                break
+
+# Étape 3 : Recherche du dossier contenant directement l'archive 'lol v2.zip'
+if detected_dir is None:
+    for folder in DRIVE_ROOT.iterdir():
+        if folder.is_dir() and not folder.name.startswith("."):
+            try:
+                if any(_is_lol_archive(f) for f in folder.iterdir()):
+                    detected_dir = folder
+                    break
+            except Exception:
+                continue
+
+# Étape 4 : Recherche par nom canonique du projet sur Drive (PAS de dossier ' 2')
+if detected_dir is None:
+    canonical_candidates = [
+        "nightvision-gen",
+        "Night Vision Generation",
+        "NightVision_Gen",
+        "nightvision_gen",
+        "night-vision-gen",
+        "NightVisionGen"
+    ]
+    for name in canonical_candidates:
+        cand = DRIVE_ROOT / name
+        if cand.exists() and cand.is_dir():
+            detected_dir = cand
             break
 
-# Étape C : Fallback
+# Étape 5 : Recherche par mots-clés ('night' et 'vision') en excluant tout dossier temporaire '... 2'
 if detected_dir is None:
-    detected_dir = DRIVE_ROOT / "night vision-gen 2"
+    for folder in DRIVE_ROOT.iterdir():
+        if folder.is_dir() and not folder.name.startswith("."):
+            clean = re.sub(r'[^a-z0-9]', '', folder.name.lower())
+            if ("night" in clean and "vision" in clean) or "nightvision" in clean:
+                if not folder.name.strip().endswith(" 2"):
+                    detected_dir = folder
+                    break
+
+# Étape 6 : Fallback par défaut sur le nom canonique officiel
+if detected_dir is None:
+    detected_dir = DRIVE_ROOT / "nightvision-gen"
     detected_dir.mkdir(parents=True, exist_ok=True)
 
 GDRIVE_DIR = detected_dir
 
-# Création des sous-dossiers de sortie dans le dossier Drive de l'utilisateur
-# pour qu'il puisse récupérer facilement checkpoints et métriques sur sa machine locale
+# Préparation des dossiers de sortie sur Google Drive (checkpoints, logs, images générées)
 (GDRIVE_DIR / "checkpoints").mkdir(parents=True, exist_ok=True)
 (GDRIVE_DIR / "logs").mkdir(parents=True, exist_ok=True)
 (GDRIVE_DIR / "generated_images").mkdir(parents=True, exist_ok=True)
 
 print("=" * 70)
-print(f"✅ Dossier Google Drive sélectionné : '{GDRIVE_DIR.name}'")
+print(f"✅ Dossier Google Drive actif : '{GDRIVE_DIR.name}'")
 print(f"📁 Chemin complet : {GDRIVE_DIR}")
 
-direct_zips = [f.name for f in GDRIVE_DIR.glob("*.zip")]
-if direct_zips:
-    print(f"📦 Datasets zippés trouvés directement dans ce dossier : {direct_zips}")
-else:
-    print("ℹ️ Aucun .zip trouvé directement à la racine de ce dossier.")
-    print("   (La cellule 4 effectuera une recherche approfondie si besoin).")
-
-print("📂 Les checkpoints, logs et aperçus seront sauvegardés directement ici.")
+# Liste des éléments trouvés dans ce dossier
+folder_items = [f.name for f in GDRIVE_DIR.iterdir()]
+print(f"📋 Contenu détecté ({len(folder_items)} éléments) : {folder_items}")
+print("📂 Les checkpoints, métriques et aperçus seront sauvegardés ici.")
 print("=" * 70)"""),
         code_cell("""# 3. Clone du dépôt GitHub Public et installation du package
 import os, sys
@@ -461,44 +495,70 @@ EXDARK_ROOT.mkdir(parents=True, exist_ok=True)
 
 drive_root = Path("/content/drive/MyDrive")
 
-# 1. Recherche tolérante de l'archive LOL-v2 : 'LOL V2.zip', 'LOLv2.zip', 'lol v2.zip', etc.
+# 1. Recherche tolérante de l'archive LOL-v2 : 'lol v2.zip', 'LOL V2.zip', 'LOLv2.zip', etc.
 def find_lol_archive() -> Path | None:
-    # A. Dans le dossier identifié sur Drive
+    # A. Dans le dossier identifié sur Drive (recherche récursive complète)
     if GDRIVE_DIR.exists():
-        for f in GDRIVE_DIR.iterdir():
-            if f.is_file() and f.suffix.lower() == ".zip" and "lol" in f.name.lower():
-                return f
-        for f in GDRIVE_DIR.rglob("*.zip"):
-            if "lol" in f.name.lower():
-                return f
+        for root, _, files in os.walk(GDRIVE_DIR):
+            for fname in files:
+                fl = fname.lower()
+                if fl.endswith(".zip") and "lol" in fl:
+                    return Path(root) / fname
 
-    # B. Dans tous les autres sous-dossiers de Mon Drive
+    # B. Directement à la racine de Mon Drive (/content/drive/MyDrive)
+    try:
+        for fname in os.listdir(drive_root):
+            fl = fname.lower()
+            if fl.endswith(".zip") and "lol" in fl:
+                return drive_root / fname
+    except Exception:
+        pass
+
+    # C. Dans tous les autres sous-dossiers de Mon Drive (profondeur max 2)
     for folder in drive_root.iterdir():
         if folder.is_dir() and not folder.name.startswith("."):
             try:
-                for f in folder.glob("*.zip"):
-                    if "lol" in f.name.lower():
-                        return f
-            except OSError:
+                for root, dirs, files in os.walk(folder):
+                    depth = len(Path(root).relative_to(folder).parts)
+                    if depth > 2:
+                        dirs.clear()
+                        continue
+                    for fname in files:
+                        fl = fname.lower()
+                        if fl.endswith(".zip") and "lol" in fl:
+                            return Path(root) / fname
+            except Exception:
                 continue
-
-    # C. À la racine de Mon Drive
-    for f in drive_root.glob("*.zip"):
-        if "lol" in f.name.lower():
-            return f
     return None
 
 def find_exdark_archive() -> Path | None:
     if GDRIVE_DIR.exists():
-        for f in GDRIVE_DIR.iterdir():
-            if f.is_file() and f.suffix.lower() == ".zip" and "exdark" in f.name.lower():
-                return f
-        for f in GDRIVE_DIR.rglob("*.zip"):
-            if "exdark" in f.name.lower():
-                return f
-    for f in drive_root.glob("*.zip"):
-        if "exdark" in f.name.lower():
-            return f
+        for root, _, files in os.walk(GDRIVE_DIR):
+            for fname in files:
+                fl = fname.lower()
+                if fl.endswith(".zip") and "exdark" in fl:
+                    return Path(root) / fname
+    try:
+        for fname in os.listdir(drive_root):
+            fl = fname.lower()
+            if fl.endswith(".zip") and "exdark" in fl:
+                return drive_root / fname
+    except Exception:
+        pass
+    for folder in drive_root.iterdir():
+        if folder.is_dir() and not folder.name.startswith("."):
+            try:
+                for root, dirs, files in os.walk(folder):
+                    depth = len(Path(root).relative_to(folder).parts)
+                    if depth > 2:
+                        dirs.clear()
+                        continue
+                    for fname in files:
+                        fl = fname.lower()
+                        if fl.endswith(".zip") and "exdark" in fl:
+                            return Path(root) / fname
+            except Exception:
+                continue
     return None
 
 target_test_file = LOL_ROOT / "Real_captured" / "Train" / "Normal" / "normal00567.png"
@@ -512,11 +572,27 @@ if not target_test_file.exists() or png_count < 100:
         print("❌ ERREUR : Archive LOL-v2 introuvable sur Google Drive !")
         print("="*70)
         print(f"Dossier inspecté : {GDRIVE_DIR}")
-        print("Contenu actuel du dossier Drive :")
+        print("Fichiers dans ce dossier :")
         for item in GDRIVE_DIR.iterdir():
             print(f"  - {item.name}")
+        
+        # Scanner et afficher les archives .zip présentes sur Drive pour aider l'utilisateur
+        discovered_zips = []
+        try:
+            for root, _, files in os.walk(drive_root):
+                for f in files:
+                    if f.lower().endswith(".zip"):
+                        discovered_zips.append(str(Path(root) / f))
+                if len(discovered_zips) >= 8:
+                    break
+        except Exception:
+            pass
+        if discovered_zips:
+            print("\nArchives .zip repérées sur votre Google Drive :")
+            for z in discovered_zips:
+                print(f"  • {z}")
         print("="*70 + "\n")
-        raise FileNotFoundError("Archive 'LOL V2.zip' ou 'LOLv2.zip' introuvable.")
+        raise FileNotFoundError("Archive 'lol v2.zip' introuvable sur Google Drive.")
 
     print(f"📦 Archive LOL détectée : '{lol_zip.name}'")
     print(f"📁 Dossier source : {lol_zip.parent}")
@@ -611,10 +687,11 @@ EPOCHS = 100 # @param {type:"integer"}
 BATCH_SIZE = 16 # @param {type:"integer"}
 LEARNING_RATE = 1e-4 # @param {type:"number"}
 LAMBDA_EDGE = 0.05 # @param {type:"number"}
-RESUME_TRAINING = False # @param {type:"boolean"}
+RESUME_TRAINING = True # @param {type:"boolean"}
 
 print(f"🎯 Variante sélectionnée : Modèle {MODEL_VARIANT}")
 print(f"   Époques : {EPOCHS} | Batch size : {BATCH_SIZE} | LR : {LEARNING_RATE}")
+print(f"   Reprise depuis checkpoint si disponible : {RESUME_TRAINING}")
 if MODEL_VARIANT == "C":
     print(f"   Poids de la perte de contours (lambda_edge) : {LAMBDA_EDGE}")"""),
         code_cell("""# 6. Chargement de la configuration YAML correspondante
@@ -716,14 +793,32 @@ from nightvision.training.trainer import Trainer
 
 trainer = Trainer(config=cfg, train_loader=train_loader, val_loader=val_loader)
 
-# Reprise éventuelle depuis un checkpoint existant
+# Reprise automatique depuis un checkpoint existant (pour continuer l'entraînement d'hier)
+resumed = False
 latest_ckpt = drive_ckpt_dir / "checkpoint_latest.pt"
-if RESUME_TRAINING and latest_ckpt.exists():
-    print("🔄 Reprise de l'entraînement depuis :", latest_ckpt)
-    trainer.resume_from_checkpoint(latest_ckpt)
 
-# Lancement de l'entraînement
-print(f"🚀 Démarrage de l'entraînement du Modèle {MODEL_VARIANT} depuis zéro...")
+# Liste ordonnée des checkpoints candidats
+candidate_ckpts = [latest_ckpt, drive_ckpt_dir / "checkpoint_best.pt"]
+candidate_ckpts += sorted(drive_ckpt_dir.glob("checkpoint_epoch_*.pt"), reverse=True)
+candidate_ckpts += sorted((GDRIVE_DIR / "checkpoints").rglob("*.pt"), reverse=True)
+
+if RESUME_TRAINING:
+    for ckpt in candidate_ckpts:
+        if ckpt.exists() and ckpt.is_file() and ckpt.stat().st_size > 1024:
+            print(f"🔄 Checkpoint valide détecté : {ckpt.name} (dans {ckpt.parent.name})")
+            try:
+                trainer.resume_from_checkpoint(ckpt)
+                print(f"✅ Reprise réussie ! Reprise à partir de l'époque {trainer.start_epoch} (step {trainer.global_step})")
+                resumed = True
+                break
+            except Exception as e:
+                print(f"⚠️ Erreur lors du chargement de {ckpt.name} : {e}")
+
+if resumed:
+    print(f"🚀 Poursuite de l'entraînement du Modèle {MODEL_VARIANT} de l'époque {trainer.start_epoch} jusqu'à {EPOCHS}...")
+else:
+    print(f"🚀 Démarrage de l'entraînement du Modèle {MODEL_VARIANT} depuis le début (Époque 1 / {EPOCHS})...")
+
 trainer.train()"""),
         code_cell("""# 9. Visualisation des Courbes d'Apprentissage et du Dernier Aperçu
 import json

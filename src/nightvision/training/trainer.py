@@ -405,19 +405,19 @@ class Trainer:
             if is_best:
                 self.best_val_loss = val_loss
 
-            if epoch % ckpt_freq == 0 or epoch == total_epochs or is_best:
-                ema_state = self.ema.state_dict() if self.ema is not None else None
-                self.ckpt_manager.save(
-                    epoch=epoch,
-                    global_step=self.global_step,
-                    model=self.model,
-                    optimizer=self.optimizer,
-                    scheduler=self.scheduler,
-                    val_metric=val_loss,
-                    is_best=is_best,
-                    ema_state=ema_state,
-                    config=self.cfg.to_dict(),
-                )
+            # Checkpoint : toujours sauvegarder checkpoint_latest.pt à chaque époque pour reprise sécurisée
+            ema_state = self.ema.state_dict() if self.ema is not None else None
+            self.ckpt_manager.save(
+                epoch=epoch,
+                global_step=self.global_step,
+                model=self.model,
+                optimizer=self.optimizer,
+                scheduler=self.scheduler,
+                val_metric=val_loss,
+                is_best=is_best,
+                ema_state=ema_state,
+                config=self.cfg.to_dict(),
+            )
 
         logger.info(
             "Training complete for Model %s. Best Val Loss: %.4f", self.variant, self.best_val_loss
