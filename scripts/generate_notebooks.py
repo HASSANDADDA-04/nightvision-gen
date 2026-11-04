@@ -341,7 +341,8 @@ from google.colab import drive
 from pathlib import Path
 import os, re
 
-drive.mount('/content/drive')
+# Montage avec force_remount pour forcer l'actualisation du cache FUSE des fichiers téléversés
+drive.mount('/content/drive', force_remount=True)
 DRIVE_ROOT = Path('/content/drive/MyDrive')
 
 # @title Configuration du Dossier Google Drive { run: "auto" }
@@ -363,7 +364,20 @@ if DRIVE_FOLDER_NAME.strip():
     if custom.exists():
         detected_dir = custom
 
-# Étape 2 : Recherche prioritaire du dossier contenant déjà des checkpoints (pour continuer l'entraînement d'hier !)
+# Étape 2 : Recherche absolue du dossier qui contient physiquement 'LOLv2.zip' ou 'ExDark.zip'
+if detected_dir is None:
+    # Examiner tous les dossiers de Drive (y compris en cas de doublons de noms)
+    for folder in DRIVE_ROOT.iterdir():
+        if folder.is_dir() and not folder.name.startswith("."):
+            try:
+                folder_files = [f.name.lower() for f in folder.iterdir() if f.is_file()]
+                if any("lol" in f and f.endswith(".zip") for f in folder_files):
+                    detected_dir = folder
+                    break
+            except Exception:
+                continue
+
+# Étape 3 : Recherche du dossier contenant déjà des checkpoints (pour continuer l'entraînement d'hier !)
 if detected_dir is None:
     for folder in DRIVE_ROOT.iterdir():
         if folder.is_dir() and not folder.name.startswith("."):
@@ -371,17 +385,6 @@ if detected_dir is None:
             if ckpt_sub.exists() and list(ckpt_sub.rglob("*.pt")):
                 detected_dir = folder
                 break
-
-# Étape 3 : Recherche du dossier contenant directement l'archive 'lol v2.zip'
-if detected_dir is None:
-    for folder in DRIVE_ROOT.iterdir():
-        if folder.is_dir() and not folder.name.startswith("."):
-            try:
-                if any(_is_lol_archive(f) for f in folder.iterdir()):
-                    detected_dir = folder
-                    break
-            except Exception:
-                continue
 
 # Étape 4 : Recherche par nom canonique du projet sur Drive (PAS de dossier ' 2')
 if detected_dir is None:
@@ -470,7 +473,7 @@ try:
     import nightvision
     print("✅ Package nightvision installé et importé avec succès sur Colab !")
 except ModuleNotFoundError:
-    print("\n⚠️ Note Colab : Pour finaliser l'enregistrement dans Python 3.13 :")
+    print("⚠️ Note Colab : Pour finaliser l'enregistrement dans Python 3.13 :")
     print("👉 Allez dans le menu : Exécution > Redémarrer la session (Runtime > Restart session)")
     print("👉 Puis relancez cette cellule : l'import sera immédiat !")"""),
         code_cell("""# 4. Décompression et préparation des datasets depuis Google Drive vers le SSD rapide de Colab
@@ -495,26 +498,51 @@ EXDARK_ROOT.mkdir(parents=True, exist_ok=True)
 
 drive_root = Path("/content/drive/MyDrive")
 
-# 1. Recherche tolérante de l'archive LOL-v2 : 'lol v2.zip', 'LOL V2.zip', 'LOLv2.zip', etc.
+# 1. Recherche tolérante de l'archive LOL-v2 : 'LOLv2.zip', 'lolv2.zip', 'lol v2.zip', etc.
 def find_lol_archive() -> Path | None:
-    # A. Dans le dossier identifié sur Drive (recherche récursive complète)
+    # A. Dans le dossier identifié sur Drive
     if GDRIVE_DIR.exists():
+        for exact_name in ["LOLv2.zip", "lolv2.zip", "LOL v2.zip", "lol v2.zip", "LOL-v2.zip", "lol-v2.zip"]:
+            direct_p = GDRIVE_DIR / exact_name
+            if direct_p.is_file():
+                return direct_p
         for root, _, files in os.walk(GDRIVE_DIR):
             for fname in files:
                 fl = fname.lower()
-                if fl.endswith(".zip") and ("lol" in fl or "LOL" in fname):
+                if fl.endswith(".zip") and "lol" in fl:
                     return Path(root) / fname
 
-    # B. Directement à la racine de Mon Drive (/content/drive/MyDrive)
+    # B. Dans tout autre dossier nommé 'nightvision*' sur Drive (au cas où il y a un dossier en double)
+    for folder in drive_root.glob("*nightvision*"):
+        if folder.is_dir():
+            try:
+                for fname in os.listdir(folder):
+                    fl = fname.lower()
+                    if fl.endswith(".zip") and "lol" in fl:
+                        return folder / fname
+            except Exception:
+                pass
+
+    # C. Recherche par commande système Linux find (contourne tout cache d'arborescence)
+    try:
+        lines = !find /content/drive/MyDrive -iname "*LOLv2*.zip" -o -iname "*lol*.zip" 2>/dev/null
+        for l in lines:
+            cand = Path(l.strip())
+            if cand.is_file():
+                return cand
+    except Exception:
+        pass
+
+    # D. Directement à la racine de Mon Drive (/content/drive/MyDrive)
     try:
         for fname in os.listdir(drive_root):
             fl = fname.lower()
-            if fl.endswith(".zip") and ("lol" in fl or "LOL" in fname):
+            if fl.endswith(".zip") and "lol" in fl:
                 return drive_root / fname
     except Exception:
         pass
 
-    # C. Dans tous les autres sous-dossiers de Mon Drive (profondeur max 2)
+    # E. Dans tous les autres sous-dossiers de Mon Drive (profondeur max 2)
     for folder in drive_root.iterdir():
         if folder.is_dir() and not folder.name.startswith("."):
             try:
@@ -525,7 +553,7 @@ def find_lol_archive() -> Path | None:
                         continue
                     for fname in files:
                         fl = fname.lower()
-                        if fl.endswith(".zip") and ("lol" in fl or "LOL" in fname):
+                        if fl.endswith(".zip") and "lol" in fl:
                             return Path(root) / fname
             except Exception:
                 continue
@@ -533,18 +561,43 @@ def find_lol_archive() -> Path | None:
 
 def find_exdark_archive() -> Path | None:
     if GDRIVE_DIR.exists():
+        for exact_name in ["ExDark.zip", "exdark.zip"]:
+            direct_p = GDRIVE_DIR / exact_name
+            if direct_p.is_file():
+                return direct_p
         for root, _, files in os.walk(GDRIVE_DIR):
             for fname in files:
                 fl = fname.lower()
-                if fl.endswith(".zip") and ("exdark" in fl or "ExDark" in fname):
+                if fl.endswith(".zip") and "exdark" in fl:
                     return Path(root) / fname
+
+    for folder in drive_root.glob("*nightvision*"):
+        if folder.is_dir():
+            try:
+                for fname in os.listdir(folder):
+                    fl = fname.lower()
+                    if fl.endswith(".zip") and "exdark" in fl:
+                        return folder / fname
+            except Exception:
+                pass
+
+    try:
+        lines = !find /content/drive/MyDrive -iname "*exdark*.zip" 2>/dev/null
+        for l in lines:
+            cand = Path(l.strip())
+            if cand.is_file():
+                return cand
+    except Exception:
+        pass
+
     try:
         for fname in os.listdir(drive_root):
             fl = fname.lower()
-            if fl.endswith(".zip") and ("exdark" in fl or "ExDark" in fname):
+            if fl.endswith(".zip") and "exdark" in fl:
                 return drive_root / fname
     except Exception:
         pass
+
     for folder in drive_root.iterdir():
         if folder.is_dir() and not folder.name.startswith("."):
             try:
@@ -555,7 +608,7 @@ def find_exdark_archive() -> Path | None:
                         continue
                     for fname in files:
                         fl = fname.lower()
-                        if fl.endswith(".zip") and ("exdark" in fl or "ExDark" in fname):
+                        if fl.endswith(".zip") and "exdark" in fl:
                             return Path(root) / fname
             except Exception:
                 continue
@@ -567,8 +620,18 @@ png_count = len(list(LOL_ROOT.rglob("*.png")))
 # Décompression si le dataset n'est pas encore présent sur le SSD local
 if not target_test_file.exists() or png_count < 100:
     lol_zip = find_lol_archive()
+
+    # Si introuvable au premier passage, rafraîchissement forcé du montage Drive (flush cache FUSE)
     if lol_zip is None:
-        print("\n" + "="*70)
+        print("🔄 Archive non visible au premier passage : actualisation du cache Drive (force_remount)...")
+        try:
+            from google.colab import drive
+            drive.mount('/content/drive', force_remount=True)
+            lol_zip = find_lol_archive()
+        except Exception as e:
+            print("Note actualisation :", e)
+    if lol_zip is None:
+        print("="*70)
         print("❌ ERREUR : Archive LOL-v2 introuvable sur Google Drive !")
         print("="*70)
         print(f"Dossier inspecté : {GDRIVE_DIR}")
@@ -588,11 +651,11 @@ if not target_test_file.exists() or png_count < 100:
         except Exception:
             pass
         if discovered_zips:
-            print("\nArchives .zip repérées sur votre Google Drive :")
+            print("Archives .zip repérées sur votre Google Drive :")
             for z in discovered_zips:
                 print(f"  • {z}")
-        print("="*70 + "\n")
-        raise FileNotFoundError("Archive 'lolv2.zip' ou 'lol v2.zip' introuvable sur Google Drive.")
+        print("="*70)
+        raise FileNotFoundError("Archive 'LOLv2.zip' ou 'lolv2.zip' introuvable sur Google Drive.")
 
     print(f"📦 Archive LOL détectée : '{lol_zip.name}'")
     print(f"📁 Dossier source : {lol_zip.parent}")
@@ -664,7 +727,7 @@ train_low_imgs = list((LOL_ROOT / "Real_captured" / "Train" / "Low").glob("*.*")
 train_norm_imgs = list((LOL_ROOT / "Real_captured" / "Train" / "Normal").glob("*.*"))
 test_low_imgs = list((LOL_ROOT / "Real_captured" / "Test" / "Low").glob("*.*"))
 
-print("\n" + "="*60)
+print("="*60)
 print("📊 BILAN DU DATASET LOL-v2 SUR LE SSD LOCAL COLAB :")
 print(f"  • Images sombres (Train Low)     : {len(train_low_imgs)} images")
 print(f"  • Images normales (Train Normal) : {len(train_norm_imgs)} images")
