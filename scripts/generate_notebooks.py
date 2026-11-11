@@ -856,14 +856,20 @@ from nightvision.training.trainer import Trainer
 
 trainer = Trainer(config=cfg, train_loader=train_loader, val_loader=val_loader)
 
-# Reprise automatique depuis un checkpoint existant (pour continuer l'entraînement d'hier)
+# Reprise automatique depuis un checkpoint existant (strictement réservé à la variante MODEL_VARIANT)
 resumed = False
 latest_ckpt = drive_ckpt_dir / "checkpoint_latest.pt"
 
-# Liste ordonnée des checkpoints candidats
+# Liste ordonnée des checkpoints candidats STRICTEMENT pour le modèle sélectionné
 candidate_ckpts = [latest_ckpt, drive_ckpt_dir / "checkpoint_best.pt"]
 candidate_ckpts += sorted(drive_ckpt_dir.glob("checkpoint_epoch_*.pt"), reverse=True)
-candidate_ckpts += sorted((GDRIVE_DIR / "checkpoints").rglob("*.pt"), reverse=True)
+
+# Repli historique UNIQUEMENT pour le Modèle A si les anciens checkpoints étaient directement dans 'checkpoints/'
+if MODEL_VARIANT == "A":
+    for legacy_name in ["checkpoint_latest.pt", "checkpoint_best.pt"]:
+        legacy_path = GDRIVE_DIR / "checkpoints" / legacy_name
+        if legacy_path.exists() and legacy_path not in candidate_ckpts:
+            candidate_ckpts.append(legacy_path)
 
 if RESUME_TRAINING:
     for ckpt in candidate_ckpts:
@@ -878,7 +884,11 @@ if RESUME_TRAINING:
                 print(f"⚠️ Erreur lors du chargement de {ckpt.name} : {e}")
 
 if resumed:
-    print(f"🚀 Poursuite de l'entraînement du Modèle {MODEL_VARIANT} de l'époque {trainer.start_epoch} jusqu'à {EPOCHS}...")
+    if trainer.start_epoch > EPOCHS:
+        print(f"⚠️ Attention : Le checkpoint chargé est déjà à l'époque {trainer.start_epoch - 1} (>= {EPOCHS} demandées) !")
+        print(f"💡 Pour poursuivre, augmentez 'EPOCHS' dans la Cellule 5 (ex: {trainer.start_epoch + 50}), ou mettez 'RESUME_TRAINING = False' pour réentraîner depuis zéro.")
+    else:
+        print(f"🚀 Poursuite de l'entraînement du Modèle {MODEL_VARIANT} de l'époque {trainer.start_epoch} jusqu'à {EPOCHS}...")
 else:
     print(f"🚀 Démarrage de l'entraînement du Modèle {MODEL_VARIANT} depuis le début (Époque 1 / {EPOCHS})...")
 
